@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "zomato-mcp-server": {
+      "url": "https://mcp-server.zomato.com/mcp",
+      "transport": {
+        "type": "sse"
+      },
+      "headers": {
+        "Authorization": "Bearer YOUR_ZOMATO_API_KEY"
+      }
+    }
+  }
+}

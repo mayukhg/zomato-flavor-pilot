@@ -93,26 +93,50 @@ FlavorPilot implements AI across four core architectural pillars:
 
 ## Quick Start
 
-### 📡 Zomato MCP Server Connection
+### 📡 Connecting to Zomato MCP Server
 
-FlavorPilot is configured to connect to the **official Zomato MCP server** for real restaurant data:
+FlavorPilot supports **two integration approaches** with the official Zomato MCP server:
+
+#### **Option 1: Native Cursor MCP (Recommended for IDE Users) ⭐**
+
+Connect Cursor IDE directly to Zomato MCP - **no Python setup required**:
+
+1. **Add to Cursor's `mcp.json`:**
+   ```json
+   {
+     "mcpServers": {
+       "zomato-mcp-server": {
+         "url": "https://mcp-server.zomato.com/mcp",
+         "transport": {
+           "type": "sse"
+         }
+       }
+     }
+   }
+   ```
+
+2. **Restart Cursor** - Zomato tools will appear in MCP tool picker
+
+**See:** [`docs/CURSOR_MCP_INTEGRATION.md`](docs/CURSOR_MCP_INTEGRATION.md) for complete guide
+
+#### **Option 2: Python Backend Integration**
+
+For FlavorPilot backend and autonomous agents:
 
 ```bash
-# In .env - Set to false to use real Zomato data
+# In .env
 USE_MOCK_MCP=false
 ZOMATO_MCP_SERVER_URL=https://mcp-server.zomato.com/mcp
 ```
 
-**Note:** The Zomato MCP server requires authentication. See [`docs/ZOMATO_MCP_SETUP.md`](docs/ZOMATO_MCP_SETUP.md) for:
-- How to obtain API credentials
-- Authentication setup
-- Connection testing
-- Fallback to mock data
-
-**Quick Test:**
+**Test connection:**
 ```bash
 python3 scripts/test_zomato_mcp_connection.py
 ```
+
+**See:** [`docs/ZOMATO_MCP_SETUP.md`](docs/ZOMATO_MCP_SETUP.md) for backend setup
+
+---
 
 ### 🚀 Platform-Specific Commands & Installation
 

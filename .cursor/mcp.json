@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "zomato-mcp-server": {
+      "url": "https://mcp-server.zomato.com/mcp",
+      "transport": {
+        "type": "sse"
+      }
+    }
+  }
+}
