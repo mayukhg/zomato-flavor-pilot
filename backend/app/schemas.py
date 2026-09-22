@@ -17,6 +17,15 @@ class SearchRequest(BaseModel):
     dietary_constraints: Optional[list[str]] = Field(None, description="Dietary constraints")
 
 
+class MenuItemResult(BaseModel):
+    """Menu item returned by the Zomato MCP server."""
+    item_id: str
+    name: str
+    price_inr: float
+    tags: list[str] = []
+    detail: str = ""
+
+
 class RestaurantResult(BaseModel):
     """Restaurant search result."""
     restaurant_id: str
@@ -28,15 +37,34 @@ class RestaurantResult(BaseModel):
     delivery_fee_inr: float
     tags: list[str]
     image_url: Optional[str] = None
+    menu_items: list[MenuItemResult] = []
 
 
-class MenuItemResult(BaseModel):
-    """Menu item returned by the Zomato MCP server."""
-    item_id: str
-    name: str
-    price_inr: float
-    tags: list[str] = []
-    detail: str = ""
+class MealPlan(BaseModel):
+    """Plan produced by the routed model before Zomato search."""
+    keyword: str
+    dietary_constraints: list[str] = []
+    budget_cap_inr: Optional[float] = None
+    max_delivery_mins: Optional[int] = None
+    rationale: str = ""
+    model: str
+
+
+class DietaryReview(BaseModel):
+    """Menu items the model kept after checking them against the live menu."""
+    item_ids: list[str] = []
+    notes: str = ""
+    allergen_flags: list[str] = []
+    model: str = ""
+
+
+class EvalScore(BaseModel):
+    """Scores for one search. Groundedness is capped by ids that exist."""
+    groundedness: float
+    dietary_fit: float
+    safety: float
+    notes: str = ""
+    model: str = ""
 
 
 class SearchResponse(BaseModel):
@@ -46,6 +74,20 @@ class SearchResponse(BaseModel):
     session_id: Optional[str] = None
     execution_time_ms: float
     model_used: str
+    cost_usd: float = 0
+    plan: Optional[MealPlan] = None
+    dietary_review: Optional[DietaryReview] = None
+    evaluation: Optional[EvalScore] = None
+    llm_error: Optional[str] = None
+
+
+class EvalJudgeRequest(BaseModel):
+    """Score one finished search without reading the database."""
+    query: str
+    dietary_constraints: list[str] = []
+    restaurants: list[RestaurantResult] = []
+    menu_items: list[MenuItemResult] = []
+    selected_item_ids: list[str] = []
 
 
 # ===== Agent Trajectory Models =====

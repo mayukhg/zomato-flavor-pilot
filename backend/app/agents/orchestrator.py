@@ -7,6 +7,7 @@ from typing import Any, Optional
 from backend.app.mcp import ZomatoMCPClient
 from backend.app.mcp.zomato_client import flatten_menu_items
 from backend.app.config import settings
+from backend.app.llm import LLMClient, LLMNotConfigured
 from backend.db import get_session
 from backend.db.models import AgentTrajectory
 
@@ -89,25 +90,27 @@ class WorkerAgent:
                     dietary_filter=dietary_constraints[0] if dietary_constraints else None,
                 )
             
-            step.tool_result = menu_data
-            step.status = "success"
-            step.model_used = settings.smart_intern_model
-            step.cost_usd = 0.0001  # Mock cost
-            
-            # Verify allergen safety
-            verified_items = []
-            for category in menu_data.get("categories", []):
-                for item in category.get("items", []):
-                    item_tags = item.get("tags", [])
-                    if all(constraint.lower().replace(" ", "_") in item_tags for constraint in dietary_constraints):
-                        verified_items.append(item)
+            review = context.get("dietary_review") or {}
+            judged = "item_ids" in review
+            verified_ids = review.get("item_ids") or []
+            notes = review.get("notes") or context.get("llm_error") or ""
+            step.tool_result = {
+                "menu_item_count": len(flatten_menu_items(menu_data)),
+                "verified_item_ids": verified_ids,
+                "notes": notes,
+                "allergen_flags": review.get("allergen_flags") or [],
+            }
+            step.status = "success" if judged or not context.get("llm_error") else "error"
+            step.model_used = review.get("model") or settings.smart_intern_model
+            step.cost_usd = float(context.get("dietary_cost_usd") or 0)
             
             result = {
-                "status": "success",
-                "verified_items_count": len(verified_items),
-                "dietary_constraints_met": len(verified_items) > 0,
-                "allergen_safe": True,
-                "verified_items": verified_items[:3],  # Top 3
+                "status": "success" if judged or not context.get("llm_error") else "error",
+                "verified_items_count": len(verified_ids),
+                "dietary_constraints_met": bool(verified_ids) if judged and dietary_constraints else not bool(context.get("llm_error")),
+                "allergen_safe": not review.get("allergen_flags"),
+                "verified_items": verified_ids[:3],
+                "notes": notes,
             }
             
         except Exception as e:
@@ -140,8 +143,8 @@ class WorkerAgent:
                 "message": "Promo codes are applied on the Zomato cart at checkout.",
             }
             step.status = "success"
-            step.model_used = settings.smart_intern_model
-            step.cost_usd = 0.0001
+            step.model_used = context.get("model_used") or settings.smart_intern_model
+            step.cost_usd = 0
             
             result = {
                 "status": "success",
@@ -186,8 +189,8 @@ class WorkerAgent:
                 "delivery_fee_inr": delivery_fee,
             }
             step.status = "success"
-            step.model_used = settings.smart_intern_model
-            step.cost_usd = 0.0001
+            step.model_used = context.get("model_used") or settings.smart_intern_model
+            step.cost_usd = 0
             
             result = {
                 "status": "success",
@@ -239,16 +242,55 @@ class LeadAgent:
         
         start_time = time.time()
         model_used = self._determine_complexity()
-        
-        # Step 1: Lead searches restaurants
-        search_step = AgentStep(
+        llm = LLMClient()
+        plan: Optional[dict[str, Any]] = None
+        dietary_review: Optional[dict[str, Any]] = None
+        evaluation: Optional[dict[str, Any]] = None
+        llm_error: Optional[str] = None
+        llm_cost = 0.0
+
+        try:
+            plan, plan_cost = await llm.plan(
+                query=query,
+                group_size=group_size,
+                dietary_constraints=dietary_constraints,
+                budget_cap_inr=budget_cap_inr,
+                model=model_used,
+            )
+            llm_cost += plan_cost
+        except LLMNotConfigured as error:
+            llm_error = str(error)
+            logger.warning(llm_error)
+        except Exception as error:
+            llm_error = f"Meal plan failed: {error}"
+            logger.error(llm_error)
+
+        plan_step = AgentStep(
             agent_type="lead",
             step_number=1,
+            tool_name="plan_meal",
+            tool_arguments={"query": query, "group_size": group_size},
+        )
+        plan_step.tool_result = plan or {"error": llm_error}
+        plan_step.status = "success" if plan else "error"
+        plan_step.model_used = model_used
+        plan_step.cost_usd = llm_cost
+        self.steps.append(plan_step)
+
+        search_keyword = (plan or {}).get("keyword") or None
+        search_budget = budget_cap_inr if budget_cap_inr is not None else (plan or {}).get("budget_cap_inr")
+        active_constraints = dietary_constraints or (plan or {}).get("dietary_constraints") or []
+        
+        # Step 2: Lead searches restaurants
+        search_step = AgentStep(
+            agent_type="lead",
+            step_number=2,
             tool_name="search_restaurants",
             tool_arguments={
                 "query": query,
                 "location": location,
-                "budget_cap_inr": budget_cap_inr,
+                "budget_cap_inr": search_budget,
+                "keyword": search_keyword,
             },
         )
         
@@ -271,13 +313,15 @@ class LeadAgent:
             restaurants = await mcp_client.search_restaurants(
                 query=query,
                 location=location,
-                budget_cap_inr=budget_cap_inr,
+                budget_cap_inr=search_budget,
+                keyword=search_keyword,
+                max_delivery_mins=(plan or {}).get("max_delivery_mins"),
             )
             
-            search_step.tool_result = {"restaurants": restaurants}
+            search_step.tool_result = {"restaurants": restaurants, "keyword": search_keyword}
             search_step.status = "success"
             search_step.model_used = model_used
-            search_step.cost_usd = 0.0005 if model_used == settings.phd_reasoner_model else 0.0001
+            search_step.cost_usd = 0
             search_step.execution_time_ms = (time.time() - step_start) * 1000
             self.steps.append(search_step)
 
@@ -288,21 +332,61 @@ class LeadAgent:
             if restaurant_id:
                 try:
                     menu = await mcp_client.get_menu(restaurant_id=restaurant_id)
-                    menu_items = flatten_menu_items(menu)
+                    menu_items = flatten_menu_items(menu) or list(selected_restaurant.get("menu_items") or [])
                 except Exception as menu_error:
                     logger.warning("Menu fetch failed for %s: %s", restaurant_id, menu_error)
+                    menu_items = list(selected_restaurant.get("menu_items") or [])
+            if restaurants:
+                restaurants[0]["menu_items"] = menu_items or list(restaurants[0].get("menu_items") or [])
+
+            review_cost = 0.0
+            if menu_items and llm_error is None:
+                try:
+                    dietary_review, review_cost = await llm.judge_menu(
+                        query=query,
+                        dietary_constraints=active_constraints,
+                        menu_items=menu_items,
+                        model=model_used,
+                    )
+                    llm_cost += review_cost
+                    chosen = set(dietary_review["item_ids"])
+                    matched = [item for item in menu_items if item["item_id"] in chosen]
+                    if matched:
+                        menu_items = matched
+                except Exception as error:
+                    llm_error = f"Dietary judgment failed: {error}"
+                    logger.error(llm_error)
+
+            if llm_error is None:
+                try:
+                    evaluation, score_cost = await llm.score(
+                        query=query,
+                        dietary_constraints=active_constraints,
+                        restaurants=restaurants,
+                        menu_items=menu_items,
+                        selected_item_ids=[item["item_id"] for item in menu_items],
+                        model=model_used,
+                    )
+                    llm_cost += score_cost
+                except Exception as error:
+                    llm_error = f"Eval scoring failed: {error}"
+                    logger.error(llm_error)
             
             # If group order with constraints, spawn workers
-            if group_size > 1 or dietary_constraints:
+            if group_size > 1 or dietary_constraints or active_constraints:
                 context = {
                     "restaurant_id": restaurant_id,
-                    "dietary_constraints": dietary_constraints or [],
-                    "budget_cap_inr": budget_cap_inr,
+                    "dietary_constraints": active_constraints,
+                    "budget_cap_inr": search_budget,
                     "location": location,
-                    "max_delivery_mins": 30,
+                    "max_delivery_mins": (plan or {}).get("max_delivery_mins") or 30,
                     "menu": menu,
                     "eta_mins": selected_restaurant.get("eta_mins"),
                     "delivery_fee_inr": selected_restaurant.get("delivery_fee_inr"),
+                    "dietary_review": dietary_review or {},
+                    "dietary_cost_usd": review_cost if dietary_review else 0,
+                    "llm_error": llm_error,
+                    "model_used": model_used,
                 }
                 
                 # Spawn worker agents in parallel
@@ -346,6 +430,11 @@ class LeadAgent:
                 "synthesis": synthesis,
                 "execution_time_ms": total_time,
                 "model_used": model_used,
+                "cost_usd": llm_cost,
+                "plan": plan,
+                "dietary_review": dietary_review,
+                "evaluation": evaluation,
+                "llm_error": llm_error,
             }
             
         except Exception as e:

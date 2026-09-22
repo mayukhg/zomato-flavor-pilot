@@ -556,6 +556,7 @@ class ZomatoMCPClient:
         cuisine: Optional[str] = None,
         max_delivery_mins: Optional[int] = None,
         budget_cap_inr: Optional[float] = None,
+        keyword: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """
         Search for restaurants matching criteria.
@@ -570,7 +571,7 @@ class ZomatoMCPClient:
         Returns:
             List of restaurant objects with ratings, ETA, fees
         """
-        keyword = zomato_keyword(query)
+        keyword = keyword.strip() if keyword and keyword.strip() else zomato_keyword(query)
         arguments = {
             "query": keyword,
             "location": location,
@@ -596,7 +597,7 @@ class ZomatoMCPClient:
         if not restaurants and isinstance(payload, dict) and payload.get("text"):
             raise ZomatoMCPToolError(str(payload["text"]))
         for restaurant in restaurants:
-            dishes = restaurant.pop("menu_items", [])
+            dishes = restaurant.get("menu_items") or []
             if dishes:
                 self._menus[str(restaurant["restaurant_id"])] = {
                     "restaurant_id": restaurant["restaurant_id"],

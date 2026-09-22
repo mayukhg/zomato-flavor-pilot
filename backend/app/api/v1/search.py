@@ -3,7 +3,15 @@ import time
 import uuid
 from fastapi import APIRouter, HTTPException
 
-from backend.app.schemas import MenuItemResult, RestaurantResult, SearchRequest, SearchResponse
+from backend.app.schemas import (
+    DietaryReview,
+    EvalScore,
+    MealPlan,
+    MenuItemResult,
+    RestaurantResult,
+    SearchRequest,
+    SearchResponse,
+)
 from backend.app.agents import LeadAgent
 
 router = APIRouter()
@@ -51,12 +59,22 @@ async def search_restaurants(request: SearchRequest):
         
         execution_time_ms = (time.time() - start_time) * 1000
         
+        plan = MealPlan(**result["plan"]) if result.get("plan") else None
+        review = result.get("dietary_review") or None
+        dietary_review = DietaryReview(**{key: review[key] for key in ("item_ids", "notes", "allergen_flags", "model") if key in review}) if review else None
+        evaluation = EvalScore(**result["evaluation"]) if result.get("evaluation") else None
+
         return SearchResponse(
             restaurants=restaurants,
             menu_items=menu_items,
             session_id=session_id,
             execution_time_ms=execution_time_ms,
             model_used=result.get("model_used", "unknown"),
+            cost_usd=float(result.get("cost_usd") or 0),
+            plan=plan,
+            dietary_review=dietary_review,
+            evaluation=evaluation,
+            llm_error=result.get("llm_error"),
         )
         
     except Exception as e:

@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     smart_intern_model: str = "meta-llama/llama-3.3-70b-instruct"
     phd_reasoner_model: str = "anthropic/claude-sonnet-4"
     routing_threshold: float = 0.75
+    llm_base_url: str = "https://openrouter.ai/api/v1"
+    llm_api_key: str = ""
     
     @property
     def cors_origins_list(self) -> list[str]:

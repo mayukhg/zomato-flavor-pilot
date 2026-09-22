@@ -28,6 +28,7 @@ export interface RestaurantResult {
   delivery_fee_inr: number;
   tags: string[];
   image_url?: string | null;
+  menu_items?: MenuItemResult[];
 }
 
 export interface MenuItemResult {
@@ -38,12 +39,41 @@ export interface MenuItemResult {
   detail: string;
 }
 
+export interface MealPlan {
+  keyword: string;
+  dietary_constraints: string[];
+  budget_cap_inr?: number | null;
+  max_delivery_mins?: number | null;
+  rationale: string;
+  model: string;
+}
+
+export interface DietaryReview {
+  item_ids: string[];
+  notes: string;
+  allergen_flags: string[];
+  model: string;
+}
+
+export interface EvalScore {
+  groundedness: number;
+  dietary_fit: number;
+  safety: number;
+  notes: string;
+  model: string;
+}
+
 export interface SearchResponse {
   restaurants: RestaurantResult[];
   menu_items: MenuItemResult[];
   session_id?: string;
   execution_time_ms: number;
   model_used: string;
+  cost_usd?: number;
+  plan?: MealPlan | null;
+  dietary_review?: DietaryReview | null;
+  evaluation?: EvalScore | null;
+  llm_error?: string | null;
 }
 
 export interface AgentStep {

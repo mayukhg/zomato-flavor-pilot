@@ -3,15 +3,39 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select, func
 
+from backend.app.llm import LLMClient, LLMNotConfigured
+from backend.app.llm.client import route_model
 from backend.app.schemas import (
     EvalCaseResponse,
+    EvalJudgeRequest,
     EvalResultResponse,
+    EvalScore,
     EvalSummaryResponse,
 )
 from backend.db import get_session
 from backend.db.models import EvalCase, EvalResult
 
 router = APIRouter()
+
+
+@router.post("/judge", response_model=EvalScore)
+async def judge_search(request: EvalJudgeRequest):
+    """Score one search with the routed model. Does not place an order."""
+    model = route_model(request.query, group_size=1)
+    try:
+        scores, _cost = await LLMClient().score(
+            query=request.query,
+            dietary_constraints=request.dietary_constraints,
+            restaurants=[row.model_dump() for row in request.restaurants],
+            menu_items=[item.model_dump() for item in request.menu_items],
+            selected_item_ids=request.selected_item_ids,
+            model=model,
+        )
+    except LLMNotConfigured as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=f"Eval scoring failed: {error}") from error
+    return EvalScore(**scores)
 
 
 @router.get("/cases", response_model=list[EvalCaseResponse])

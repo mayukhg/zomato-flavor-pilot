@@ -71,11 +71,31 @@ Zomato FlavorPilot connects to a dedicated **Zomato MCP Server** exposing five c
 Traditional algorithmic search engines cannot interpret nuanced human desires like *"comfort food for a rainy evening that fits my 1,800-calorie daily goal and doesn't trigger my gluten intolerance."* AI provides the multi-step reasoning required to balance dietary health, taste preferences, group constraints, and cost optimization simultaneously.
 
 ### How AI is Implemented
-FlavorPilot implements AI across four core architectural pillars:
-- **Six-Part Resident Anatomy**: Operates as an always-on **Resident** server agent with a reasoning **Brain**, Zomato MCP tool **Hands**, **4-Tier Memory** (Working Memory, Session Notes, Knowledge Base, Muscle Memory), iterative execution **Loops**, security **Guardrails**, and dedicated tenant **Workspaces**.
-- **Lead-Worker Orchestration**: A **Lead Agent** breaks complex group orders into parallel briefs, spawning **Worker 1** (Dietary & Macro Checker), **Worker 2** (Price & Promo Optimizer), and **Worker 3** (Delivery & ETA Coordinator).
-- **Dynamic 4-Lens Model Routing**: Routes 85% of volume to `meta-llama/llama-3.3-70b-instruct` ("Smart Intern" @ $0.12/1M) and escalates 15% complex group synthesis to `anthropic/claude-sonnet-4` ("PhD Reasoner" @ $3.00/1M).
-- **Dual Evaluation Triads**: Runs the **RAG Triad** (Retrieval Quality, Context Relevance, Groundedness >98%) and **Agent Trajectory Triad** (Tool Selection, Argument Correctness, Execution Loop Efficiency) paired with **LLM-as-a-Judge** bias-defusing rubrics.
+FlavorPilot calls a live model on every search, then uses Zomato MCP for restaurants and menus. The client is `backend/app/llm/client.py`. It speaks the OpenAI chat-completions API. OpenRouter is the default host because it serves both model ids.
+
+Routing (`route_model`):
+
+- **Smart Intern** (`meta-llama/llama-3.3-70b-instruct`) handles a solo request with no group or allergy language.
+- **PhD Reasoner** (`anthropic/claude-sonnet-4`) handles `group_size` greater than 1, or a prompt that mentions group, team, people, allergy, allergen, or constraints.
+
+Each search makes three model calls with that routed model:
+
+1. **Plan.** Turn the prompt into a short Zomato keyword, dietary constraints, budget, ETA, and a rationale. The keyword is what `get_restaurants_for_keyword` searches. The model is told not to name restaurants.
+2. **Judge.** After the live menu is loaded, keep only `item_id`s that appear on that menu. Unknown ids are dropped. Notes and allergen flags come back with the kept ids.
+3. **Score.** Return groundedness, dietary fit, and safety from 0 to 1. Groundedness is capped by how many cited item ids actually exist, so a model cannot claim a perfect score for invented dishes.
+
+The same score call is available on its own as `POST /api/v1/evals/judge`. It does not read the database and does not place an order.
+
+If `LLM_API_KEY` is empty, Zomato search still runs. The UI shows **Reasoner did not run** and the metrics stay blank. Set the key and restart the API. The process reads `.env` only at startup.
+
+```env
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-...
+SMART_INTERN_MODEL=meta-llama/llama-3.3-70b-instruct
+PHD_REASONER_MODEL=anthropic/claude-sonnet-4
+```
+
+Cost uses the provider `usage.cost` when OpenRouter sends it. Otherwise the client estimates from token counts at $0.12 per million for the Smart Intern and $3.00 per million for the PhD Reasoner. The header shows that cost and the latency of the last search.
 
 ---
 
@@ -126,8 +146,15 @@ For FlavorPilot backend and autonomous agents:
 ```bash
 # In .env
 USE_MOCK_MCP=false
+ZOMATO_MCP_TRANSPORT=stdio
 ZOMATO_MCP_SERVER_URL=https://mcp-server.zomato.com/mcp
+ZOMATO_MCP_STDIO_CMD=npx -y mcp-remote https://mcp-server.zomato.com/mcp
+ZOMATO_ADDRESS_ID=217570301
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=your-openrouter-key
 ```
+
+Restart the API after changing `LLM_API_KEY`. Search still returns Zomato kitchens without it, and the UI reports that the reasoner did not run.
 
 **Test connection:**
 ```bash

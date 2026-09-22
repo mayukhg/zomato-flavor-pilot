@@ -9,6 +9,7 @@
 1. [Quick Start](#quick-start)
 2. [Initial Setup](#initial-setup)
 3. [Using FlavorPilot](#using-flavorpilot)
+   - [The reasoner](#3-the-reasoner)
 4. [Common Use Cases](#common-use-cases)
 5. [Advanced Features](#advanced-features)
 6. [Troubleshooting](#troubleshooting)
@@ -65,16 +66,22 @@ Before running FlavorPilot, ensure you have:
    FASTAPI_HOST=0.0.0.0
    FASTAPI_PORT=8000
    
-   # MCP Server Configuration
-   MCP_SERVER_TRANSPORT=stdio  # or http+sse
-   MCP_SERVER_COMMAND=npx
-   MCP_SERVER_ARGS=-y,@zomato/mcp-server
-   MCP_SERVER_URL=http://localhost:3000/sse  # if using HTTP/SSE
-   
-   # Model Router Configuration
-   MODEL_ROUTER_SIMPLE=meta-llama/llama-3.3-70b-instruct
-   MODEL_ROUTER_COMPLEX=anthropic/claude-sonnet-4
+   # Zomato MCP
+   USE_MOCK_MCP=false
+   ZOMATO_MCP_TRANSPORT=stdio
+   ZOMATO_MCP_SERVER_URL=https://mcp-server.zomato.com/mcp
+   ZOMATO_MCP_STDIO_CMD=npx -y mcp-remote https://mcp-server.zomato.com/mcp
+   ZOMATO_ADDRESS_ID=217570301
+
+   # Reasoner. OpenRouter serves both model ids.
+   # Any OpenAI-compatible /chat/completions host works via LLM_BASE_URL.
+   LLM_BASE_URL=https://openrouter.ai/api/v1
+   LLM_API_KEY=sk-or-...
+   SMART_INTERN_MODEL=meta-llama/llama-3.3-70b-instruct
+   PHD_REASONER_MODEL=anthropic/claude-sonnet-4
    ```
+
+   Restart the API after you set `LLM_API_KEY`. The running process does not reload `.env`.
 
 3. **Configure PostgreSQL:**
    ```bash
@@ -165,20 +172,40 @@ Simply run:
 
 ---
 
-### 3. Understanding the UI
+### 3. The reasoner
+
+A search calls one model three times before the cart is filled. Group orders and any prompt that mentions a group, team, people, an allergy, or constraints use the PhD Reasoner (`anthropic/claude-sonnet-4`). A plain solo request uses the Smart Intern (`meta-llama/llama-3.3-70b-instruct`).
+
+| Call | What it returns | What it must not do |
+| --- | --- | --- |
+| Plan | A short Zomato keyword, constraints, budget, ETA, and a rationale | Name a restaurant or write a full sentence as the keyword |
+| Judge | `item_id`s copied from the live menu, notes, and allergen flags | Invent a dish or an id |
+| Score | Groundedness, dietary fit, and safety, each from 0 to 1 | Claim groundedness for an id that was not on the menu |
+
+The cart keeps the judged items when the model returns ids. Scores show in the metrics bar. The lead card shows the rationale.
+
+Without `LLM_API_KEY`, Zomato kitchens still load and a yellow banner says **Reasoner did not run**. Put the key in `.env` and restart the API.
+
+The model does not place the order. Checkout stays on Zomato, and the approval checkbox still has to be checked by hand.
+
+---
+
+### 4. Understanding the UI
 
 #### Main Dashboard Components
 
-**Metrics Bar** (Top):
-- **Groundedness**: AI accuracy score (target: >98%)
-- **Allergen Safety**: Safety verification rate (target: 100%)
-- **Cost**: Average cost per query
-- **Latency**: Response time
+**Metrics Bar** (Top), filled from the last search:
+- **Groundedness**: share of cited menu ids that exist on the live menu, capped by the model's own score
+- **Allergen safety**: the model's safety score for this result
+- **Cost / query**: provider cost, or the token estimate when the provider does not return one
+- **Latency**: wall time for that search, including the model calls and Zomato
+
+Before the first search these read as "—". They are not a historical average.
 
 **Lead-Worker Trajectory** (Middle):
-- Visual representation of agent collaboration
-- Shows which worker handled which constraints
-- Execution time for each step
+- The lead card shows the model's meal-plan rationale
+- Under it, the dietary judge's notes (budget gaps, missing vegan items, allergen flags)
+- Workers still run after the model: dietary check, promo deferral, and ETA from the Zomato result
 
 **Restaurant Cards** (Main Area):
 - Live ratings and reviews
@@ -299,36 +326,35 @@ Simply run:
 1. Navigate to http://localhost:8000/api/v1/trajectory
 2. Or click **"View Lead-Worker Trajectory"** in the UI
 
-**What You See**:
+A finished `POST /api/v1/search/` body includes the model work next to the restaurants:
+
 ```json
 {
-  "query": "Group lunch for 6 under ₹2,000",
-  "lead_agent": {
-    "decision": "complex",
-    "model_used": "claude-sonnet-4",
-    "reasoning": "Multi-constraint optimization required"
+  "model_used": "anthropic/claude-sonnet-4",
+  "cost_usd": 0.0085,
+  "plan": {
+    "keyword": "healthy bowls",
+    "dietary_constraints": ["keto", "vegan", "high protein"],
+    "budget_cap_inr": 2000,
+    "max_delivery_mins": 30,
+    "rationale": "Healthy bowls that can cover keto, vegan, and high-protein diners."
   },
-  "workers": [
-    {
-      "role": "dietary",
-      "findings": ["2 keto users", "1 nut allergy flagged"],
-      "execution_time_ms": 1240
-    },
-    {
-      "role": "price",
-      "promo_tested": ["FLAT100", "SAVE150", "FIRSTORDER"],
-      "best_promo": "SAVE150",
-      "execution_time_ms": 890
-    },
-    {
-      "role": "delivery",
-      "eta_min": 28,
-      "surge_detected": false,
-      "execution_time_ms": 560
-    }
-  ]
+  "dietary_review": {
+    "item_ids": ["v_123"],
+    "notes": "No item on this menu is both vegan and keto.",
+    "allergen_flags": ["dairy"]
+  },
+  "evaluation": {
+    "groundedness": 1.0,
+    "dietary_fit": 0.2,
+    "safety": 0.0,
+    "notes": "Cited ids exist. The selected items do not meet the stated diets."
+  },
+  "llm_error": null
 }
 ```
+
+`llm_error` is set when the key is missing or a model call fails. Restaurant results can still be present in that case.
 
 ---
 
@@ -339,10 +365,8 @@ Simply run:
 **Access**: http://localhost:5173 → Scroll to **"Quality is a release gate"** section
 
 **Metrics Displayed**:
-- **Groundedness Score**: 99.2% (RAG Triad evaluation)
-- **Allergen Safety Rate**: 100% (no false negatives)
-- **Model Routing Mix**: 85% Haiku (cheap), 15% Sonnet (complex)
-- **Golden Dataset Results**: 100/100 cases passed
+- The chart in Eval Studio is a static picture of routing mix. It is not the live judge.
+- Live scores for the search you just ran are the header numbers: groundedness, allergen safety, cost, and latency.
 
 ---
 
@@ -382,6 +406,24 @@ curl -X POST http://localhost:8000/api/v1/cart/build \
 ```bash
 curl http://localhost:8000/api/v1/evals/summary
 ```
+
+**Score one finished search** with the same judge the search uses. This does not read Postgres and does not place an order:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/evals/judge \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Group lunch for 6, keto and vegan",
+    "dietary_constraints": ["keto", "vegan"],
+    "restaurants": [],
+    "menu_items": [
+      {"item_id": "v_1", "name": "Paneer bowl", "price_inr": 329, "tags": ["veg"], "detail": "Menu"}
+    ],
+    "selected_item_ids": ["v_1"]
+  }'
+```
+
+A missing `LLM_API_KEY` returns HTTP 503.
 
 ---
 
@@ -482,7 +524,19 @@ psql -U postgres -c "CREATE DATABASE flavorpilot;"
 
 ---
 
-### Issue 4: Frontend Not Loading
+### Issue 4: Reasoner did not run
+
+**Symptoms**: Yellow banner "Reasoner did not run", header groundedness stays "—", cost stays `$0.0000`. Zomato kitchens can still appear.
+
+**Solution**:
+
+1. Set `LLM_API_KEY` in `.env`. The default `LLM_BASE_URL` is `https://openrouter.ai/api/v1`.
+2. Restart the API. A process that was already running does not pick up the new key.
+3. Search again. A group prompt should report `model_used` of `anthropic/claude-sonnet-4`. A solo prompt such as "pizza" should report the Llama Smart Intern.
+
+---
+
+### Issue 5: Frontend Not Loading
 
 **Symptoms**: Blank page or "Cannot GET /" error
 
@@ -504,7 +558,7 @@ npm run dev
 
 ---
 
-### Issue 5: Allergen Verification Fails
+### Issue 6: Allergen Verification Fails
 
 **Symptoms**: Cart approval blocked with allergen warnings
 

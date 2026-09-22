@@ -105,6 +105,10 @@ export function FlavorPilotApp() {
   const [restaurants, setRestaurants] = useState<RestaurantResult[]>([]);
   const [selectedRestaurant, setSelectedRestaurant] = useState(0);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [llmError, setLlmError] = useState<string | null>(null);
+  const [planText, setPlanText] = useState<string | null>(null);
+  const [dietNote, setDietNote] = useState<string | null>(null);
+  const [liveMetrics, setLiveMetrics] = useState<{ groundedness: string; safety: string; cost: string; latency: string } | null>(null);
   const [mcpStatus, setMcpStatus] = useState<"checking" | "offline" | "live">("checking");
 
   useEffect(() => {
@@ -141,6 +145,7 @@ export function FlavorPilotApp() {
     setWorkflow("running");
     setOrderStaged(false);
     setSearchError(null);
+    setLlmError(null);
     try {
       const result = await api.searchRestaurants({
         query: prompt,
@@ -150,8 +155,18 @@ export function FlavorPilotApp() {
       });
       setRestaurants(result.restaurants);
       setSelectedRestaurant(0);
-      setCart(menuToCart(result.menu_items ?? []));
+      const firstMenu = result.restaurants[0]?.menu_items?.length ? result.restaurants[0].menu_items : result.menu_items ?? [];
+      setCart(menuToCart(firstMenu));
       setMcpStatus("live");
+      setPlanText(result.plan?.rationale || result.plan?.keyword || null);
+      setDietNote(result.dietary_review?.notes || null);
+      setLlmError(result.llm_error || null);
+      setLiveMetrics({
+        groundedness: result.evaluation ? `${(result.evaluation.groundedness * 100).toFixed(1)}%` : "—",
+        safety: result.evaluation ? `${(result.evaluation.safety * 100).toFixed(1)}%` : "—",
+        cost: `$${(result.cost_usd ?? 0).toFixed(4)}`,
+        latency: `${Math.round(result.execution_time_ms)} ms`,
+      });
       setWorkflow("done");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Zomato MCP search failed";
@@ -218,10 +233,10 @@ export function FlavorPilotApp() {
         <main className="min-w-0 flex-1">
           <div className="overflow-x-auto border-b border-border bg-panel py-3">
             <div className="flex min-w-max px-3 lg:px-6">
-              <Metric icon={ShieldCheck} label="Groundedness" value="99.2%" tone="success" />
-              <Metric icon={CheckCircle2} label="Allergen safety" value="100%" tone="success" />
-              <Metric icon={CircleDollarSign} label="Cost / query" value="$0.0042" />
-              <Metric icon={Gauge} label="Latency P95" value="684 ms" />
+              <Metric icon={ShieldCheck} label="Groundedness" value={liveMetrics?.groundedness ?? "—"} tone="success" />
+              <Metric icon={CheckCircle2} label="Allergen safety" value={liveMetrics?.safety ?? "—"} tone="success" />
+              <Metric icon={CircleDollarSign} label="Cost / query" value={liveMetrics?.cost ?? "—"} />
+              <Metric icon={Gauge} label="Latency" value={liveMetrics?.latency ?? "—"} />
             </div>
           </div>
 
@@ -244,6 +259,7 @@ export function FlavorPilotApp() {
             </section>
 
             {searchError && <div className="mt-4 flex items-start gap-3 rounded-md border border-warning bg-warning-soft p-4 text-sm"><AlertTriangle className="mt-0.5 size-5 shrink-0 text-warning" /><div><p className="font-semibold text-warning">Zomato MCP did not return results</p><p className="mt-1 text-muted-foreground">{searchError}</p>{/auth|sign-?in|401|token|oauth|browser/i.test(searchError) && <p className="mt-1 text-muted-foreground">The first search opens a Zomato sign-in in your browser. Approve it, then search again.</p>}</div></div>}
+            {llmError && <div className="mt-4 flex items-start gap-3 rounded-md border border-warning bg-warning-soft p-4 text-sm"><AlertTriangle className="mt-0.5 size-5 shrink-0 text-warning" /><div><p className="font-semibold text-warning">Reasoner did not run</p><p className="mt-1 text-muted-foreground">{llmError}</p></div></div>}
             {orderStaged && <div className="mt-4 flex items-start gap-3 rounded-md border border-success bg-success-soft p-4 text-sm"><CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" /><div><p className="font-semibold text-success">Cart reviewed</p><p className="mt-1 text-muted-foreground">Items came from the Zomato menu. FlavorPilot does not charge the card; checkout stays on Zomato.</p></div></div>}
 
             <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(350px,.65fr)]">
@@ -252,7 +268,7 @@ export function FlavorPilotApp() {
                   <SectionTitle eyebrow="Live orchestration" title="Lead–Worker trajectory" action={<span className="flex items-center gap-2 text-xs text-muted-foreground"><span className={`size-2 rounded-full ${workflow === "running" ? "animate-pulse-soft bg-warning" : workflow === "done" ? "bg-success" : "bg-muted-foreground"}`} />{workflow === "running" ? "Running" : workflow === "done" ? "Search finished" : "Waiting for a search"}</span>} />
                   <div className="mt-6 overflow-x-auto pb-2">
                     <div className="min-w-[650px]">
-                      <div className="mx-auto flex w-fit items-center gap-3 rounded-md border border-primary bg-primary/10 px-4 py-3"><Bot className="size-5 text-primary" /><div><p className="text-xs font-bold">Lead Resident</p><p className="text-[10px] text-muted-foreground">6-person constraint synthesis</p></div></div>
+                      <div className="mx-auto flex w-fit max-w-xl items-center gap-3 rounded-md border border-primary bg-primary/10 px-4 py-3"><Bot className="size-5 shrink-0 text-primary" /><div><p className="text-xs font-bold">Lead Resident</p><p className="text-[10px] text-muted-foreground">{planText || "The routed model writes the meal plan before search."}</p>{dietNote && <p className="mt-1 text-[10px] text-muted-foreground">{dietNote}</p>}</div></div>
                       <div className="mx-auto h-6 w-px bg-border" />
                       <div className="grid grid-cols-3 gap-3 border-t border-border pt-5">
                         {workflowSteps.map((step) => {
@@ -283,7 +299,7 @@ export function FlavorPilotApp() {
                         <div className="p-4">
                           <div className="flex items-start justify-between gap-3"><div><h3 className="font-display font-semibold">{restaurant.name}</h3><p className="mt-1 text-xs text-muted-foreground">{restaurant.cuisine}{restaurant.location ? ` • ${restaurant.location}` : ""}</p></div><span className="flex items-center gap-1 rounded-sm bg-success-soft px-2 py-1 text-xs font-bold text-success"><Star className="size-3 fill-current" />{restaurant.rating.toFixed(1)}</span></div>
                           <div className="mt-4 flex items-center gap-4 text-xs text-muted-foreground"><span><Clock3 className="mr-1 inline size-3.5" />{restaurant.eta_mins} min</span><span>{restaurant.delivery_fee_inr ? `₹${Math.round(restaurant.delivery_fee_inr)} delivery` : "Delivery fee from Zomato"}</span></div>
-                          <div className="mt-3 flex items-center justify-between border-t border-border pt-3"><span className="text-[11px] text-success">{restaurant.restaurant_id}</span><Button size="sm" variant={selectedRestaurant === index ? "default" : "outline"} onClick={() => setSelectedRestaurant(index)}>{selectedRestaurant === index ? <><Check />Selected</> : <>Choose<ChevronRight /></>}</Button></div>
+                          <div className="mt-3 flex items-center justify-between border-t border-border pt-3"><span className="text-[11px] text-success">{restaurant.restaurant_id}</span><Button size="sm" variant={selectedRestaurant === index ? "default" : "outline"} onClick={() => { setSelectedRestaurant(index); setCart(menuToCart(restaurant.menu_items ?? [])); }}>{selectedRestaurant === index ? <><Check />Selected</> : <>Choose<ChevronRight /></>}</Button></div>
                         </div>
                       </article>
                     ))}
@@ -310,7 +326,7 @@ export function FlavorPilotApp() {
                 <section className="rounded-lg border border-border bg-panel p-5 xl:sticky xl:top-24">
                   <SectionTitle eyebrow="Staged Zomato cart" title={activeRestaurant?.name ?? "Selected kitchen"} action={<span className={`rounded-sm px-2 py-1 text-[10px] font-bold ${mcpStatus === "live" ? "bg-success-soft text-success" : "bg-secondary text-muted-foreground"}`}>{mcpStatus === "live" ? "From Zomato" : "No search yet"}</span>} />
                   <div className="mt-5 space-y-4">
-                    {cart.length === 0 && <p className="text-sm text-muted-foreground">Menu items from the selected Zomato restaurant show up here after a search.</p>}
+                    {cart.length === 0 && <p className="text-sm text-muted-foreground">{restaurants.length ? "Zomato did not include dishes for this kitchen." : "Menu items from the selected Zomato restaurant show up here after a search."}</p>}
                     {cart.map((item) => <div key={item.id} className="border-b border-border pb-4 last:border-0"><div className="flex justify-between gap-3"><div className="min-w-0"><div className="mb-1 flex items-center gap-2"><span className="size-2 shrink-0 rounded-sm border border-success" /><p className="truncate text-sm font-semibold">{item.name}</p></div><p className="text-[11px] text-muted-foreground">{item.detail}</p><span className="mt-2 inline-block rounded-sm bg-success-soft px-2 py-0.5 text-[9px] font-bold text-success">{item.tag}</span></div><div className="text-right"><p className="text-sm font-bold">₹{item.price * item.qty}</p><div className="mt-2 flex items-center rounded-sm border border-border"><Button size="icon" variant="ghost" className="size-7" aria-label={`Remove one ${item.name}`} onClick={() => updateQty(item.id, -1)}><Minus /></Button><span className="w-6 text-center text-xs">{item.qty}</span><Button size="icon" variant="ghost" className="size-7" aria-label={`Add one ${item.name}`} onClick={() => updateQty(item.id, 1)}><Plus /></Button></div></div></div></div>)}
                   </div>
                   <div className="mt-4 rounded-md bg-background p-4">
