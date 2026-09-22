@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Any, Optional
 
-from backend.app.mcp import ZomatoMCPClient, MockZomatoMCPClient
+from backend.app.mcp import ZomatoMCPClient, MockZomatoMCPClient, ZomatoHTTPMCPClient
 from backend.app.config import settings
 from backend.db import get_session
 from backend.db.models import AgentTrajectory
@@ -268,12 +268,19 @@ class LeadAgent:
         if settings.use_mock_mcp:
             mcp_client = MockZomatoMCPClient()
         else:
-            # Real MCP client with configured transport
-            mcp_client = ZomatoMCPClient(
-                transport=settings.zomato_mcp_transport,
-                command=settings.zomato_mcp_stdio_cmd if settings.zomato_mcp_transport == "stdio" else None,
-                server_url=settings.zomato_mcp_server_url if settings.zomato_mcp_transport == "sse" else None,
-            )
+            # Real MCP client - use HTTP client for official Zomato server
+            if settings.zomato_mcp_transport == "http":
+                mcp_client = ZomatoHTTPMCPClient(
+                    server_url=settings.zomato_mcp_server_url,
+                    api_key=settings.zomato_api_key if settings.zomato_api_key != "not_required_for_public_mcp" else None,
+                )
+            else:
+                # SSE or stdio transport using MCP SDK
+                mcp_client = ZomatoMCPClient(
+                    transport=settings.zomato_mcp_transport,
+                    server_url=settings.zomato_mcp_server_url if settings.zomato_mcp_transport == "sse" else None,
+                    stdio_cmd=settings.zomato_mcp_stdio_cmd if settings.zomato_mcp_transport == "stdio" else None,
+                )
         
         try:
             await mcp_client.connect()

@@ -91,7 +91,30 @@ FlavorPilot implements AI across four core architectural pillars:
 
 ---
 
-## Quick Start & Installation
+## Quick Start
+
+### 📡 Zomato MCP Server Connection
+
+FlavorPilot is configured to connect to the **official Zomato MCP server** for real restaurant data:
+
+```bash
+# In .env - Set to false to use real Zomato data
+USE_MOCK_MCP=false
+ZOMATO_MCP_SERVER_URL=https://mcp-server.zomato.com/mcp
+```
+
+**Note:** The Zomato MCP server requires authentication. See [`docs/ZOMATO_MCP_SETUP.md`](docs/ZOMATO_MCP_SETUP.md) for:
+- How to obtain API credentials
+- Authentication setup
+- Connection testing
+- Fallback to mock data
+
+**Quick Test:**
+```bash
+python3 scripts/test_zomato_mcp_connection.py
+```
+
+### 🚀 Platform-Specific Commands & Installation
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) 18+ & [Bun](https://bun.sh/)
