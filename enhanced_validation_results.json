@@ -1,0 +1,65 @@
+{
+  "timestamp": "2026-09-22T09:06:32.894410",
+  "summary": {
+    "total": 9,
+    "passed": 9,
+    "failed": 0,
+    "pass_rate": 100.0
+  },
+  "suites": {
+    "mcp": {
+      "passed": 3,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "MCP SDK import",
+          "status": "PASS"
+        },
+        {
+          "name": "FlavorPilot MCP client",
+          "status": "PASS"
+        },
+        {
+          "name": "5 MCP tools",
+          "status": "PASS"
+        }
+      ]
+    },
+    "agents": {
+      "passed": 3,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "Agent imports",
+          "status": "PASS"
+        },
+        {
+          "name": "Lead agent execution",
+          "status": "PASS"
+        },
+        {
+          "name": "Worker orchestration",
+          "status": "PASS"
+        }
+      ]
+    },
+    "database": {
+      "passed": 3,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "Model imports",
+          "status": "PASS"
+        },
+        {
+          "name": "Model structure",
+          "status": "PASS"
+        },
+        {
+          "name": "Required fields",
+          "status": "PASS"
+        }
+      ]
+    }
+  }
+}

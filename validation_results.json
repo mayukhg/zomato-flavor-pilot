@@ -1,0 +1,244 @@
+{
+  "timestamp": "2026-09-22T08:59:05.320308",
+  "environment": {
+    "python_version": "3.12.3 (main, Mar 23 2026, 19:04:32) [GCC 13.3.0]",
+    "test_mode": "mock_database"
+  },
+  "test_suites": [
+    {
+      "name": "Golden Dataset Validation",
+      "total": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 0,
+      "duration_seconds": 0.0007207393646240234,
+      "tests": [
+        {
+          "name": "Golden dataset file exists",
+          "status": "PASS",
+          "message": "Found at /workspace/scratch/golden_dataset_flavorpilot.json",
+          "duration_ms": 0.05269050598144531,
+          "details": {}
+        },
+        {
+          "name": "JSON structure is valid",
+          "status": "PASS",
+          "message": "Successfully parsed JSON",
+          "duration_ms": 0.5924701690673828,
+          "details": {}
+        },
+        {
+          "name": "Dataset has 100 test cases",
+          "status": "PASS",
+          "message": "Found 100 cases",
+          "duration_ms": 0.0021457672119140625,
+          "details": {
+            "expected": 100,
+            "actual": 100
+          }
+        },
+        {
+          "name": "Required fields present in test cases",
+          "status": "PASS",
+          "message": "All required fields found",
+          "duration_ms": 0.0045299530029296875,
+          "details": {}
+        },
+        {
+          "name": "Correct slice distribution",
+          "status": "PASS",
+          "message": "Distribution matches expected: {'Standard Menu Search': 50, 'Dietary & Macro Constraints': 25, 'Multi-User Group Synthesis': 15, 'Adversarial & Allergen Safety': 10}",
+          "duration_ms": 0.057220458984375,
+          "details": {
+            "distribution": {
+              "Standard Menu Search": 50,
+              "Dietary & Macro Constraints": 25,
+              "Multi-User Group Synthesis": 15,
+              "Adversarial & Allergen Safety": 10
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "MCP Client Functionality",
+      "total": 1,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0,
+      "warnings": 0,
+      "duration_seconds": 0.0032536983489990234,
+      "tests": [
+        {
+          "name": "MCP client imports successfully",
+          "status": "FAIL",
+          "message": "Import error: No module named 'mcp'",
+          "duration_ms": 3.2510757446289062,
+          "details": {}
+        }
+      ]
+    },
+    {
+      "name": "Agent Orchestration",
+      "total": 1,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0,
+      "warnings": 0,
+      "duration_seconds": 0.0032863616943359375,
+      "tests": [
+        {
+          "name": "Agent classes import successfully",
+          "status": "FAIL",
+          "message": "Import error: No module named 'mcp'",
+          "duration_ms": 3.2842159271240234,
+          "details": {}
+        }
+      ]
+    },
+    {
+      "name": "Evaluator Functionality",
+      "total": 5,
+      "passed": 4,
+      "failed": 1,
+      "skipped": 0,
+      "warnings": 0,
+      "duration_seconds": 0.0022134780883789062,
+      "tests": [
+        {
+          "name": "Evaluator classes import successfully",
+          "status": "PASS",
+          "message": "All evaluator classes imported",
+          "duration_ms": 1.7480850219726562,
+          "details": {}
+        },
+        {
+          "name": "Groundedness evaluation works",
+          "status": "PASS",
+          "message": "Score: 100.00%",
+          "duration_ms": 0.019073486328125,
+          "details": {
+            "score": 1.0
+          }
+        },
+        {
+          "name": "Allergen safety check passes for safe restaurant",
+          "status": "FAIL",
+          "message": "Expected pass, got: passed=False, score=0.0",
+          "duration_ms": 0.08416175842285156,
+          "details": {}
+        },
+        {
+          "name": "Prompt injection detection works",
+          "status": "PASS",
+          "message": "Correctly identified injection attempt",
+          "duration_ms": 0.2872943878173828,
+          "details": {}
+        },
+        {
+          "name": "Full evaluation pipeline works",
+          "status": "PASS",
+          "message": "Status: pass, Groundedness: 100.00%",
+          "duration_ms": 0.06794929504394531,
+          "details": {
+            "groundedness_score": 1.0,
+            "context_relevance_score": 0.9,
+            "retrieval_quality_score": 1.0,
+            "safety_score": 1.0,
+            "allergen_check_passed": true,
+            "prompt_injection_detected": false,
+            "status": "pass",
+            "failure_reason": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Frontend API Client",
+      "total": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 0,
+      "duration_seconds": 0.00015234947204589844,
+      "tests": [
+        {
+          "name": "API client file exists",
+          "status": "PASS",
+          "message": "/workspace/src/services/api.ts",
+          "duration_ms": 0.0476837158203125,
+          "details": {}
+        },
+        {
+          "name": "React Query hooks file exists",
+          "status": "PASS",
+          "message": "/workspace/src/hooks/useFlavorPilot.ts",
+          "duration_ms": 0.019550323486328125,
+          "details": {}
+        },
+        {
+          "name": "API client has required exports",
+          "status": "PASS",
+          "message": "Found: FlavorPilotAPI, SearchRequest, SearchResponse, CartResponse, api",
+          "duration_ms": 0.05245208740234375,
+          "details": {}
+        },
+        {
+          "name": "React Query hooks are defined",
+          "status": "PASS",
+          "message": "Found: useSearchRestaurants, useAgentTrajectory, useBuildCart, useApproveCart, useFlavorPilot",
+          "duration_ms": 0.0286102294921875,
+          "details": {}
+        }
+      ]
+    },
+    {
+      "name": "Backend Configuration",
+      "total": 4,
+      "passed": 1,
+      "failed": 3,
+      "skipped": 0,
+      "warnings": 0,
+      "duration_seconds": 0.001947164535522461,
+      "tests": [
+        {
+          "name": "Core backend files exist",
+          "status": "PASS",
+          "message": "All 4 files found",
+          "duration_ms": 0.04553794860839844,
+          "details": {}
+        },
+        {
+          "name": "Backend config loads",
+          "status": "FAIL",
+          "message": "Error: No module named 'pydantic_settings'",
+          "duration_ms": 0.6287097930908203,
+          "details": {}
+        },
+        {
+          "name": "Database models import",
+          "status": "FAIL",
+          "message": "Error: No module named 'sqlalchemy'",
+          "duration_ms": 0.8058547973632812,
+          "details": {}
+        },
+        {
+          "name": "API route modules import",
+          "status": "FAIL",
+          "message": "Error: No module named 'fastapi'",
+          "duration_ms": 0.45228004455566406,
+          "details": {}
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_tests": 20,
+    "passed": 14,
+    "failed": 6,
+    "skipped": 0,
+    "warnings": 0,
+    "duration_seconds": 0.011676311492919922
+  }
+}
