@@ -1,0 +1,325 @@
+{
+  "started": "2026-09-22T14:46:14.290Z",
+  "finished": "2026-09-22T14:47:14.417Z",
+  "frontend": "http://localhost:8080",
+  "api": "http://localhost:8000",
+  "address_id": "217570301",
+  "checkout_called": false,
+  "finished_retest": "2026-09-22T14:52:00.000Z",
+  "counts": {
+    "pass": 22,
+    "fail": 0,
+    "blocked": 3
+  },
+  "cases": [
+    {
+      "id": "API-01",
+      "area": "api",
+      "name": "API root",
+      "status": "pass",
+      "detail": "HTTP 200 transport=stdio"
+    },
+    {
+      "id": "API-02",
+      "area": "api",
+      "name": "Health endpoint",
+      "status": "pass",
+      "detail": "HTTP 200 body={\"status\":\"healthy\",\"database\":\"connected\",\"mcp_server\":\"configured\"}",
+      "note": "This endpoint reports database=connected without probing Postgres."
+    },
+    {
+      "id": "API-03",
+      "area": "mcp",
+      "name": "Zomato MCP status and tool list",
+      "status": "pass",
+      "detail": "HTTP 200 connected=true tools=10 missing=none server=https://mcp-server.zomato.com/mcp",
+      "tools": [
+        "bind_user_number",
+        "bind_user_number_verify_code",
+        "checkout_cart",
+        "create_cart",
+        "get_menu_items_listing",
+        "get_order_history",
+        "get_order_tracking_info",
+        "get_restaurant_menu_by_categories",
+        "get_restaurants_for_keyword",
+        "get_saved_addresses_for_user"
+      ]
+    },
+    {
+      "id": "API-04",
+      "area": "search",
+      "name": "Pizza search on pinned Wanwadi address",
+      "status": "pass",
+      "detail": "HTTP 200 kitchens=8 menu=6 priced=6 goaMarkers=none names=Domino's Pizza | Pizza Hut | MOJO Pizza - 2X Toppings | LeanCrust Pizza - ThinCrust Experts | Circle Of Crust | La Pino'z Pizza | Olio - The Wood Fired Pizzeria | Largo Pizzeria locations=1 km away | 1 km away | 1 km away | 1 km away | 2.8 km away | 2.6 km away | 2.5 km away | 2.7 km away",
+      "summary": {
+        "count": 8,
+        "menu": 6,
+        "names": [
+          "Domino's Pizza",
+          "Pizza Hut",
+          "MOJO Pizza - 2X Toppings",
+          "LeanCrust Pizza - ThinCrust Experts",
+          "Circle Of Crust",
+          "La Pino'z Pizza",
+          "Olio - The Wood Fired Pizzeria",
+          "Largo Pizzeria"
+        ],
+        "locations": [
+          "1 km away",
+          "1 km away",
+          "1 km away",
+          "1 km away",
+          "2.8 km away",
+          "2.6 km away",
+          "2.5 km away",
+          "2.7 km away"
+        ],
+        "ms": 4970.1502323150635,
+        "session": "session_cbf27fe5cf8e"
+      }
+    },
+    {
+      "id": "API-05",
+      "area": "search",
+      "name": "Default group-lunch prompt",
+      "status": "pass",
+      "detail": "HTTP 200 kitchens=14 menu=4 ms=10704 goaMarkers=none names=Ku - Kooch - Ku | NFP Organic Veggies And Restaurants, Kondhwa | Sattvik High Protein Pure Veg Cuisine, Bavdhan | Megh Malhar Family Restaurants, Hadapsar | WeFit - Protein Bowls, Salads & Sandwiches | The Protein Palate, Hadapsar | SB Protein Pav, Fatima Nagar | Mountain High, Wanowrie",
+      "summary": {
+        "count": 14,
+        "menu": 4,
+        "names": [
+          "Ku - Kooch - Ku",
+          "NFP Organic Veggies And Restaurants, Kondhwa",
+          "Sattvik High Protein Pure Veg Cuisine, Bavdhan",
+          "Megh Malhar Family Restaurants, Hadapsar",
+          "WeFit - Protein Bowls, Salads & Sandwiches",
+          "The Protein Palate, Hadapsar",
+          "SB Protein Pav, Fatima Nagar",
+          "Mountain High, Wanowrie"
+        ],
+        "locations": [
+          "1.3 km away",
+          "4.623455 km away",
+          "0.013017 km away",
+          "3.337 km away",
+          "0.346767 km away",
+          "4.782351 km away",
+          "0.863 km away",
+          "3.364224 km away"
+        ],
+        "ms": 10703.934907913208,
+        "session": "session_b85e4aa5064f"
+      }
+    },
+    {
+      "id": "API-06",
+      "area": "trajectory",
+      "name": "Agent trajectory persistence",
+      "status": "blocked",
+      "detail": "HTTP 500 session=session_cbf27fe5cf8e. Server log: Postgres ConnectionRefusedError errno 61. Search itself succeeded; the trajectory write is best-effort and the read cannot load a row."
+    },
+    {
+      "id": "API-07",
+      "area": "evals",
+      "name": "Eval summary endpoint",
+      "status": "blocked",
+      "detail": "HTTP 500 Internal Server Error. Server log: Postgres ConnectionRefusedError. The response body does not mention the database."
+    },
+    {
+      "id": "API-08",
+      "area": "cart",
+      "name": "Local cart staging (no Zomato checkout)",
+      "status": "blocked",
+      "detail": "HTTP 500. Server log: Postgres ConnectionRefusedError while inserting the cart. create_cart and checkout_cart were not called."
+    },
+    {
+      "id": "API-09",
+      "area": "safety",
+      "name": "No live order placement",
+      "status": "pass",
+      "detail": "create_cart and checkout_cart were not invoked. Approval in the UI only stages local state."
+    },
+    {
+      "id": "UI-01",
+      "area": "ui",
+      "name": "Dashboard loads",
+      "status": "pass",
+      "detail": "Group concierge heading rendered",
+      "screenshot": "qa_01_dashboard_initial.png"
+    },
+    {
+      "id": "UI-02",
+      "area": "ui",
+      "name": "Hero and saved-address prompt",
+      "status": "pass",
+      "detail": "Hero shows Saved Zomato address and Build my order",
+      "screenshot": "qa_02_hero.png"
+    },
+    {
+      "id": "UI-03",
+      "area": "ui",
+      "name": "Metrics bar",
+      "status": "pass",
+      "detail": "Groundedness, allergen safety, cost, and latency metrics are visible",
+      "screenshot": "qa_03_header_metrics.png"
+    },
+    {
+      "id": "UI-04",
+      "area": "mcp",
+      "name": "Header and sidebar show Zomato MCP Live",
+      "status": "pass",
+      "detail": "headerLive=true sidebarLiveCount=1",
+      "screenshot": "qa_04_mcp_health.png"
+    },
+    {
+      "id": "UI-05",
+      "area": "search",
+      "name": "Pizza search renders live kitchens",
+      "status": "pass",
+      "detail": "8 kitchens from Zomato; cards=8; mock=none; goa=none",
+      "screenshot": "qa_06_restaurant_cards.png"
+    },
+    {
+      "id": "UI-06",
+      "area": "cart",
+      "name": "Cart fills from Zomato menu",
+      "status": "pass",
+      "detail": "rupee marks=9",
+      "screenshot": "qa_07_staged_cart.png"
+    },
+    {
+      "id": "UI-07",
+      "area": "ui",
+      "name": "Lead-worker trajectory after search",
+      "status": "pass",
+      "detail": "Search finished is shown with the three workers",
+      "screenshot": "qa_08_trajectory.png"
+    },
+    {
+      "id": "UI-08",
+      "area": "ui",
+      "name": "Choose another kitchen",
+      "status": "pass",
+      "detail": "selectedButtons=1. Cart items stay from the first restaurant menu.",
+      "screenshot": "qa_09_second_kitchen.png"
+    },
+    {
+      "id": "UI-09",
+      "area": "cart",
+      "name": "Increase item quantity",
+      "status": "pass",
+      "detail": "total ₹3844 -> ₹4843",
+      "screenshot": "qa_10_quantity.png"
+    },
+    {
+      "id": "UI-10",
+      "area": "ui",
+      "name": "Stock-issue banner",
+      "status": "pass",
+      "detail": "Local re-route banner appears. It does not call Zomato.",
+      "screenshot": "qa_11_stock_reroute.png"
+    },
+    {
+      "id": "UI-11",
+      "area": "ui",
+      "name": "Group split dialog",
+      "status": "pass",
+      "detail": "Six diners shown with an even split",
+      "screenshot": "qa_12_split_bill.png"
+    },
+    {
+      "id": "UI-12",
+      "area": "approval",
+      "name": "Human approval gate",
+      "status": "pass",
+      "detail": "confirmDisabledBefore=true confirmDisabledAfterCheck=false. Banner says checkout stays on Zomato.",
+      "screenshot": "qa_15_cart_reviewed.png"
+    },
+    {
+      "id": "UI-13",
+      "area": "ui",
+      "name": "Eval studio charts",
+      "status": "pass",
+      "detail": "Groundedness chart and model routing mix render. Figures are static UI, not the eval API.",
+      "screenshot": "qa_16_eval_studio.png"
+    },
+    {
+      "id": "UI-14",
+      "area": "ui",
+      "name": "Solo mode",
+      "status": "pass",
+      "detail": "Heading switches to What are you craving today?",
+      "screenshot": "qa_17_solo_mode.png"
+    },
+    {
+      "id": "UI-15",
+      "area": "ui",
+      "name": "Browser console and failed requests",
+      "status": "pass",
+      "detail": "Fresh desktop load after hydration: 0 console errors, 0 failed network requests."
+    },
+    {
+      "id": "UI-16",
+      "area": "ui",
+      "name": "Mobile layout and navigation drawer",
+      "status": "pass",
+      "detail": "390px layout loads. After the MCP status request (hydration), the drawer opens with MCP Live and closes again.",
+      "screenshot": "qa_19_mobile_nav.png"
+    }
+  ],
+  "searches": {
+    "pizza": {
+      "count": 8,
+      "menu": 6,
+      "names": [
+        "Domino's Pizza",
+        "Pizza Hut",
+        "MOJO Pizza - 2X Toppings",
+        "LeanCrust Pizza - ThinCrust Experts",
+        "Circle Of Crust",
+        "La Pino'z Pizza",
+        "Olio - The Wood Fired Pizzeria",
+        "Largo Pizzeria"
+      ],
+      "locations": [
+        "1 km away",
+        "1 km away",
+        "1 km away",
+        "1 km away",
+        "2.8 km away",
+        "2.6 km away",
+        "2.5 km away",
+        "2.7 km away"
+      ],
+      "ms": 4970.1502323150635,
+      "session": "session_cbf27fe5cf8e"
+    },
+    "group": {
+      "count": 14,
+      "menu": 4,
+      "names": [
+        "Ku - Kooch - Ku",
+        "NFP Organic Veggies And Restaurants, Kondhwa",
+        "Sattvik High Protein Pure Veg Cuisine, Bavdhan",
+        "Megh Malhar Family Restaurants, Hadapsar",
+        "WeFit - Protein Bowls, Salads & Sandwiches",
+        "The Protein Palate, Hadapsar",
+        "SB Protein Pav, Fatima Nagar",
+        "Mountain High, Wanowrie"
+      ],
+      "locations": [
+        "1.3 km away",
+        "4.623455 km away",
+        "0.013017 km away",
+        "3.337 km away",
+        "0.346767 km away",
+        "4.782351 km away",
+        "0.863 km away",
+        "3.364224 km away"
+      ],
+      "ms": 10703.934907913208,
+      "session": "session_b85e4aa5064f"
+    }
+  }
+}

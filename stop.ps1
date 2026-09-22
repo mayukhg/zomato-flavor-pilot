@@ -1,76 +1,126 @@
-# FlavorPilot Development Server Shutdown Script (PowerShell)
+# Stop FlavorPilot by sending CTRL_BREAK to each process group, then wait.
+# taskkill /F is used only when a process is still alive after that wait.
 
 $ErrorActionPreference = "Continue"
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $Root
 
-Write-Host "🛑 Stopping FlavorPilot Development Environment..." -ForegroundColor Cyan
-Write-Host ""
+if (-not ("FlavorPilotProcess" -as [type])) {
+  Add-Type -TypeDefinition @"
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 
-$stopped = $false
+public static class FlavorPilotProcess {
+    const uint CTRL_BREAK_EVENT = 1;
 
-# Try to stop using stored job IDs first
-if (Test-Path ".flavorpilot.backend.pid") {
-    $backendJobId = Get-Content ".flavorpilot.backend.pid"
-    Write-Host "📊 Stopping FastAPI backend (Job ID: $backendJobId)..." -ForegroundColor Yellow
-    try {
-        Stop-Job -Id $backendJobId -ErrorAction SilentlyContinue
-        Remove-Job -Id $backendJobId -ErrorAction SilentlyContinue
-        Remove-Item ".flavorpilot.backend.pid" -Force
-        Write-Host "   ✓ Backend stopped" -ForegroundColor Green
-        $stopped = $true
-    } catch {
-        Write-Host "   ℹ️  Backend job not found" -ForegroundColor Gray
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool AttachConsole(uint dwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    public static extern bool FreeConsole();
+
+    [DllImport("kernel32.dll")]
+    public static extern bool SetConsoleCtrlHandler(ConsoleCtrlDelegate HandlerRoutine, bool Add);
+
+    public delegate bool ConsoleCtrlDelegate(uint CtrlType);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GenerateConsoleCtrlEvent(uint dwCtrlEvent, uint dwProcessGroupId);
+
+    public static void Break(uint pid) {
+        FreeConsole();
+        if (!AttachConsole(pid)) {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        SetConsoleCtrlHandler(null, true);
+        try {
+            if (!GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+        } finally {
+            FreeConsole();
+            SetConsoleCtrlHandler(null, false);
+        }
     }
 }
+"@
+}
 
-if (Test-Path ".flavorpilot.frontend.pid") {
-    $frontendJobId = Get-Content ".flavorpilot.frontend.pid"
-    Write-Host "⚡ Stopping Vite frontend (Job ID: $frontendJobId)..." -ForegroundColor Yellow
-    try {
-        Stop-Job -Id $frontendJobId -ErrorAction SilentlyContinue
-        Remove-Job -Id $frontendJobId -ErrorAction SilentlyContinue
-        Remove-Item ".flavorpilot.frontend.pid" -Force
-        Write-Host "   ✓ Frontend stopped" -ForegroundColor Green
-        $stopped = $true
-    } catch {
-        Write-Host "   ℹ️  Frontend job not found" -ForegroundColor Gray
+$script:Forced = $false
+$script:Stopped = $false
+
+function Test-FlavorPilotCommand {
+  param([int]$ProcessId)
+  $row = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+  if (-not $row) { return $false }
+  $command = "$($row.Name) $($row.CommandLine)"
+  return ($command -match "backend\.app\.main|python -m app\.main| app\.main|vite|npm")
+}
+
+function Stop-Gracefully {
+  param([int]$ProcessId, [string]$Label, [switch]$FromPort)
+  if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
+  if (-not $FromPort -and -not (Test-FlavorPilotCommand -ProcessId $ProcessId)) {
+    Write-Host "   Skipping pid $ProcessId; it is not a FlavorPilot process."
+    return
+  }
+  Write-Host "   Sending CTRL_BREAK to $Label ($ProcessId)."
+  try {
+    [FlavorPilotProcess]::Break([uint32]$ProcessId)
+  } catch {
+    Write-Host "   CTRL_BREAK was not delivered ($($_.Exception.Message))."
+  }
+  $deadline = (Get-Date).AddSeconds(8)
+  while ((Get-Date) -lt $deadline) {
+    if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
+      Write-Host "   $Label exited after CTRL_BREAK."
+      $script:Stopped = $true
+      return
     }
+    Start-Sleep -Milliseconds 250
+  }
+  Write-Host "   $Label is still running. Forcing stop."
+  & taskkill.exe /PID $ProcessId /T /F | Out-Null
+  $script:Forced = $true
+  $script:Stopped = $true
 }
 
-# Fallback: Kill processes by name
-Write-Host "🔍 Checking for remaining processes..." -ForegroundColor Yellow
-
-# Kill Python processes running app.main
-$pythonProcesses = Get-Process python -ErrorAction SilentlyContinue | Where-Object {
-    $_.CommandLine -like "*app.main*"
+function Stop-PidFile {
+  param([string]$Name)
+  $file = Join-Path $Root ".flavorpilot.$Name.pid"
+  if (-not (Test-Path $file)) { return }
+  $processId = 0
+  [void][int]::TryParse((Get-Content $file -Raw).Trim(), [ref]$processId)
+  if ($processId -gt 0) {
+    Stop-Gracefully -ProcessId $processId -Label $Name
+  }
+  Remove-Item $file -Force -ErrorAction SilentlyContinue
 }
-if ($pythonProcesses) {
-    $pythonProcesses | Stop-Process -Force
-    Write-Host "   ✓ Stopped backend processes" -ForegroundColor Green
-    $stopped = $true
-}
 
-# Kill Node/Vite processes on port 5173
-$frontendProcesses = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue | 
+function Stop-Port {
+  param([int]$Port)
+  $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
     Select-Object -ExpandProperty OwningProcess -Unique
-if ($frontendProcesses) {
-    $frontendProcesses | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
-    Write-Host "   ✓ Stopped frontend processes" -ForegroundColor Green
-    $stopped = $true
+  foreach ($processId in $listeners) {
+    Stop-Gracefully -ProcessId $processId -Label "port $Port" -FromPort
+  }
 }
 
-# Kill backend processes on port 8000
-$backendProcesses = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | 
-    Select-Object -ExpandProperty OwningProcess -Unique
-if ($backendProcesses) {
-    $backendProcesses | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
-    Write-Host "   ✓ Stopped backend port 8000 processes" -ForegroundColor Green
-    $stopped = $true
-}
+Write-Host "Stopping FlavorPilot..."
+Stop-PidFile -Name "backend"
+Stop-PidFile -Name "frontend"
+Stop-Port -Port 8000
+Stop-Port -Port 8080
+Stop-Port -Port 5173
 
-if (-not $stopped) {
-    Write-Host "   ℹ️  No FlavorPilot processes found" -ForegroundColor Gray
+if (-not $script:Stopped) {
+  Write-Host "   No FlavorPilot processes found."
 }
-
 Write-Host ""
-Write-Host "✅ FlavorPilot has been stopped!" -ForegroundColor Green
+if ($script:Forced) {
+  Write-Host "FlavorPilot stopped, but one process needed a forced kill."
+  exit 1
+}
+Write-Host "FlavorPilot stopped."
 Write-Host ""

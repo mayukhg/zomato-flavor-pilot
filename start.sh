@@ -1,61 +1,90 @@
 #!/usr/bin/env bash
+# Start FlavorPilot and record the process-group leaders so stop.sh can
+# shut both servers down with SIGTERM.
 
-# FlavorPilot Development Server Startup Script
+set -u
 
-set -e
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+mkdir -p "$ROOT/.run"
 
-echo "🚀 Starting FlavorPilot Development Environment..."
+echo "Starting FlavorPilot..."
 
-# Check if PostgreSQL is running
-if ! command -v pg_isready &> /dev/null; then
-    echo "⚠️  PostgreSQL not found. Please install PostgreSQL 14+ with pgvector extension."
-    echo "   Installation guide: https://www.postgresql.org/download/"
+if command -v pg_isready >/dev/null 2>&1 && pg_isready -h localhost -q >/dev/null 2>&1; then
+  echo "PostgreSQL is accepting connections."
+  if command -v psql >/dev/null 2>&1; then
+    psql -h localhost -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'flavorpilot'" 2>/dev/null | grep -q 1 \
+      || psql -h localhost -U postgres -c "CREATE DATABASE flavorpilot" >/dev/null 2>&1 \
+      || echo "Could not create the flavorpilot database. Continuing."
+  fi
+else
+  echo "PostgreSQL is not running. The API will start, and database writes will fail until it is up."
 fi
 
-# Create database if it doesn't exist
-echo "📊 Setting up database..."
-psql -h localhost -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'flavorpilot'" | grep -q 1 || \
-    psql -h localhost -U postgres -c "CREATE DATABASE flavorpilot"
-
-# Install Python dependencies
-echo "📦 Installing Python dependencies..."
-pip install -q -r backend/requirements.txt
-
-# Generate golden dataset
-if [ ! -f "/workspace/scratch/golden_dataset_flavorpilot.json" ]; then
-    echo "🔧 Generating golden dataset..."
-    python seed_data_flavorpilot.py
+if [[ -x "$ROOT/.venv/bin/python" ]]; then
+  PY="$ROOT/.venv/bin/python"
+else
+  PY="$(command -v python3 || command -v python || true)"
+fi
+if [[ -z "${PY}" ]]; then
+  echo "Python was not found."
+  exit 1
 fi
 
-# Seed database
-echo "🌱 Seeding database..."
-python scripts/seed_database.py
+launch() {
+  local name="$1"
+  shift
+  python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@" \
+    >"$ROOT/.run/${name}.log" 2>&1 &
+  echo $! >"$ROOT/.flavorpilot.${name}.pid"
+  echo "   ${name} pid $(cat "$ROOT/.flavorpilot.${name}.pid")"
+}
 
-# Start FastAPI backend in background
-echo "🔥 Starting FastAPI backend server..."
-cd backend && python -m app.main &
-BACKEND_PID=$!
+echo "Starting the API..."
+launch backend "$PY" -m backend.app.main
 
-# Wait for backend to be ready
-echo "⏳ Waiting for backend to be ready..."
-sleep 3
+echo "Starting the frontend..."
+launch frontend npm run dev
 
-# Start frontend dev server
-echo "⚡ Starting Vite frontend dev server..."
-cd ..
-npm run dev &
-FRONTEND_PID=$!
+echo "Waiting for the API and the frontend..."
+backend_ready=0
+frontend_ready=0
+frontend_url="http://localhost:8080"
+for _ in $(seq 1 40); do
+  if [[ "$backend_ready" -eq 0 ]] && curl -sf "http://127.0.0.1:8000/health" >/dev/null 2>&1; then
+    backend_ready=1
+  fi
+  if [[ "$frontend_ready" -eq 0 ]]; then
+    if curl -sf "http://127.0.0.1:8080" >/dev/null 2>&1; then
+      frontend_ready=1
+      frontend_url="http://localhost:8080"
+    elif curl -sf "http://127.0.0.1:5173" >/dev/null 2>&1; then
+      frontend_ready=1
+      frontend_url="http://localhost:5173"
+    fi
+  fi
+  if [[ "$backend_ready" -eq 1 && "$frontend_ready" -eq 1 ]]; then
+    break
+  fi
+  sleep 0.5
+done
 
 echo ""
-echo "✅ FlavorPilot is running!"
-echo ""
-echo "   Frontend: http://localhost:5173"
+if [[ "$backend_ready" -eq 1 && "$frontend_ready" -eq 1 ]]; then
+  echo "FlavorPilot is running."
+else
+  echo "FlavorPilot did not finish starting. See .run/backend.log and .run/frontend.log."
+fi
+echo "   Frontend:    ${frontend_url}"
 echo "   Backend API: http://localhost:8000"
-echo "   API Docs: http://localhost:8000/docs"
+echo "   API docs:    http://localhost:8000/docs"
 echo ""
-echo "Press Ctrl+C to stop all services"
+echo "Press Ctrl+C to stop both servers."
 
-# Trap SIGINT and cleanup
-trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit" SIGINT
+cleanup() {
+  "$ROOT/stop.sh"
+  exit 0
+}
+trap cleanup INT TERM
 
 wait

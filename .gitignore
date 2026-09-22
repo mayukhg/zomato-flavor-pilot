@@ -30,3 +30,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+.flavorpilot.backend.pid
+.flavorpilot.frontend.pid
+.run/
