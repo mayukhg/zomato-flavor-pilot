@@ -4,29 +4,79 @@
 
 ---
 
-## Your Action Items
+## ⚠️ IMPORTANT UPDATE: Zomato API is Restricted
 
-### Step 1: Get Zomato API Access 🔑
+**Discovery**: Zomato API access requires business partnership and whitelisting.
 
-**What you need to do:**
+When trying to access https://developers.zomato.com/, you'll see:
+> "Your organisation is not whitelisted to view this page."
+> Please reach out to posintegrations@zomato.com
 
-1. **Go to Zomato Developers Portal**:
-   - Visit: https://developers.zomato.com/
-   - Create an account or log in
+**This changes everything!** See below for updated options.
 
-2. **Create an Application**:
-   - Click "Generate API Key" or "Create Application"
-   - Fill in application details:
-     - Name: "FlavorPilot"
-     - Description: "AI-powered dining assistant"
-     - Purpose: "Restaurant search and menu data"
+---
 
-3. **Copy Your API Key**:
-   - You'll get a key like: `zm_live_abc123xyz789def456...`
-   - Save this securely (you'll need it in Step 3)
+## Your REVISED Action Items
 
-**⏱️ Time**: 10-15 minutes  
-**Status**: ⏸️ **WAITING ON YOU**
+### Option A: Request Zomato Partnership (Real Data)
+
+**If you want real Zomato data:**
+
+1. **Email Zomato**:
+   - To: posintegrations@zomato.com
+   - Subject: "API Partnership Request for FlavorPilot"
+   - Include:
+     - Your company/organization name
+     - Business use case
+     - Expected API usage volume
+     - Why you need Zomato data
+
+2. **Wait for approval**: 1-4 weeks
+
+**⏱️ Time**: 1-4 weeks  
+**Status**: ⏸️ **WAITING ON ZOMATO APPROVAL**
+
+---
+
+### Option B: Use Mock Data (Recommended) ⭐
+
+**FlavorPilot already works perfectly with mock data!**
+
+**What works:**
+- ✅ Full UI with all features
+- ✅ Agent orchestration
+- ✅ Search, cart, approval flows
+- ✅ Evaluation framework
+- ✅ Perfect for demos and development
+
+**What's mocked:**
+- Restaurant data (hardcoded names)
+- Prices (static values)
+- Menus (predefined items)
+
+**No action needed** - it already works! Keep `USE_MOCK_MCP=true`
+
+**⏱️ Time**: 0 minutes (already done)  
+**Status**: ✅ **READY TO USE NOW**
+
+---
+
+### Option C: Use Alternative API (Real Data)
+
+**Public APIs you can use instead:**
+
+**Yelp Fusion API** (USA, public access):
+- Free tier: 5,000 calls/day
+- Sign up: https://www.yelp.com/developers
+- Get API key immediately
+
+**Google Places API** (Global):
+- $200 free credit/month
+- Sign up: https://developers.google.com/maps/documentation/places
+- Immediate access
+
+**⏱️ Time**: 30 minutes  
+**Status**: ⏸️ **YOUR CHOICE**
 
 ---
 
