@@ -99,19 +99,34 @@ FlavorPilot implements AI across four core architectural pillars:
 - [PostgreSQL](https://www.postgresql.org/) with `pgvector` extension
 - Active Zomato MCP Server instance or local mock MCP runner
 
-### Setup & Run
+### Quick start (recommended):
+
+| Platform | Start | Stop |
+| --- | --- | --- |
+| macOS / Linux | `./start.sh` | `./stop.sh` |
+| Windows (PowerShell) | `./start.ps1` | `./stop.ps1` |
+
+**Example:**
+```bash
+git clone https://github.com/mayukhg/zomato-flavor-pilot.git
+cd zomato-flavor-pilot
+./start.sh        # installs dependencies on first run, then starts the API and cockpit
+```
+
+### Manual Setup & Run
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/zomato-flavorpilot.git
-cd zomato-flavorpilot
+git clone https://github.com/mayukhg/zomato-flavor-pilot.git
+cd zomato-flavor-pilot
 
 # Install frontend and backend dependencies
 npm install
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 
 # Seed Golden Dataset & Database
-python scripts/seed_data_flavorpilot.py
+python seed_data_flavorpilot.py
+python scripts/seed_database.py
 
 # Launch local dev environment (Lovable UI + FastAPI + MCP Bridge)
 ./start.sh
