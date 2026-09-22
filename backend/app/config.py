@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/flavorpilot"
     
+    # MCP Configuration
+    use_mock_mcp: bool = True  # Set to False to use real Zomato MCP server
     zomato_mcp_transport: Literal["stdio", "sse"] = "stdio"
     zomato_mcp_stdio_cmd: str = "node /path/to/zomato-mcp-server/dist/index.js"
     zomato_mcp_server_url: str = "http://localhost:8080/sse"

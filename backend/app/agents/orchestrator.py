@@ -264,8 +264,16 @@ class LeadAgent:
             },
         )
         
-        # Use mock client for development
-        mcp_client = MockZomatoMCPClient()
+        # Use mock or real MCP client based on configuration
+        if settings.use_mock_mcp:
+            mcp_client = MockZomatoMCPClient()
+        else:
+            # Real MCP client with configured transport
+            mcp_client = ZomatoMCPClient(
+                transport=settings.zomato_mcp_transport,
+                command=settings.zomato_mcp_stdio_cmd if settings.zomato_mcp_transport == "stdio" else None,
+                server_url=settings.zomato_mcp_server_url if settings.zomato_mcp_transport == "sse" else None,
+            )
         
         try:
             await mcp_client.connect()
