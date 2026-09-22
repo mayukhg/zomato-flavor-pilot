@@ -85,4 +85,5 @@ if __name__ == "__main__":
         host=settings.backend_host,
         port=settings.backend_port,
         reload=True,
+        reload_dirs=["backend"],
     )

@@ -27,10 +27,21 @@ export interface RestaurantResult {
   eta_mins: number;
   delivery_fee_inr: number;
   tags: string[];
+  image_url?: string | null;
+}
+
+export interface MenuItemResult {
+  item_id: string;
+  name: string;
+  price_inr: number;
+  tags: string[];
+  detail: string;
 }
 
 export interface SearchResponse {
   restaurants: RestaurantResult[];
+  menu_items: MenuItemResult[];
+  session_id?: string;
   execution_time_ms: number;
   model_used: string;
 }
@@ -145,7 +156,8 @@ class FlavorPilotAPI {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: response.statusText }));
-      throw new Error(error.message || `API error: ${response.status}`);
+      const detail = typeof error.detail === 'string' ? error.detail : error.message;
+      throw new Error(detail || `API error: ${response.status}`);
     }
 
     return response.json();
@@ -196,6 +208,10 @@ class FlavorPilotAPI {
 
   async healthCheck(): Promise<{ status: string }> {
     return this.request<{ status: string }>('/health');
+  }
+
+  async mcpStatus(): Promise<{ connected: boolean; server: string; tools: string[]; detail?: string }> {
+    return this.request('/mcp/status');
   }
 }
 

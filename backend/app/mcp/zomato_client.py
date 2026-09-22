@@ -14,6 +14,312 @@ from backend.app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Official Zomato MCP tool names, with the names this app used to call first.
+TOOL_ALIASES: dict[str, list[str]] = {
+    "search_restaurants": ["get_restaurants_for_keyword", "search_restaurants", "zomato.search_restaurants"],
+    "get_menu": ["get_menu_items_listing", "get_restaurant_menu_by_categories", "get_menu", "zomato.get_menu"],
+    "get_saved_addresses": ["get_saved_addresses_for_user"],
+    "get_item_customizations": ["get_item_customizations", "zomato.get_item_customizations"],
+    "create_cart": ["create_cart", "add_to_cart", "zomato.build_cart", "build_cart"],
+    "apply_promo_code": ["apply_promo_code", "zomato.apply_promo_code"],
+}
+
+ARGUMENT_ALIASES: dict[str, list[str]] = {
+    "query": ["keyword", "query", "q", "search_query", "prompt", "text"],
+    "location": ["location", "area", "city", "locality", "place"],
+    "latitude": ["latitude", "lat"],
+    "longitude": ["longitude", "lng", "lon", "long"],
+    "cuisine": ["cuisine", "cuisines"],
+    "max_delivery_mins": ["max_delivery_mins", "max_delivery_time", "delivery_time"],
+    "budget_cap_inr": ["budget_cap_inr", "budget", "max_budget", "price_cap"],
+    "restaurant_id": ["res_id", "restaurant_id", "restaurantId", "id"],
+    "address_id": ["address_id", "addressId"],
+    "filter": ["filter"],
+    "dietary_filter": ["dietary_filter", "diet", "dietary"],
+    "item_id": ["item_id", "itemId"],
+    "items": ["items"],
+    "delivery_address": ["delivery_address", "address"],
+    "promo_code": ["promo_code", "promoCode", "coupon"],
+    "payment_type": ["payment_type", "paymentType"],
+}
+
+CITY_COORDS: dict[str, tuple[float, float]] = {
+    "bengaluru": (12.9716, 77.5946),
+    "bangalore": (12.9716, 77.5946),
+    "indiranagar": (12.9784, 77.6408),
+    "koramangala": (12.9352, 77.6245),
+    "mumbai": (19.0760, 72.8777),
+    "delhi": (28.6139, 77.2090),
+    "new delhi": (28.6139, 77.2090),
+    "hyderabad": (17.3850, 78.4867),
+    "chennai": (13.0827, 80.2707),
+    "pune": (18.5204, 73.8567),
+    "kolkata": (22.5726, 88.3639),
+}
+
+
+_DISH_WORDS = (
+    "pizza", "biryani", "burger", "thali", "pasta", "sushi", "chinese", "indian",
+    "salad", "sandwich", "dosa", "idli", "noodles", "shawarma", "momos", "coffee",
+    "breakfast", "dessert", "rolls", "paneer", "chicken",
+)
+
+
+def _eta_minutes(text: str) -> Optional[int]:
+    parts = text.lower().replace("–", " ").replace("-", " ").split()
+    for index, part in enumerate(parts):
+        if part.isdigit() and index + 1 < len(parts) and parts[index + 1].startswith("min"):
+            return int(part)
+    return None
+
+
+def zomato_keyword(query: str) -> str:
+    """Turn a dining prompt into the short keyword Zomato's search tool expects."""
+    text = query.lower()
+    dishes = [word for word in _DISH_WORDS if word in text]
+    if dishes:
+        base = " and ".join(dishes[:3])
+    elif "protein" in text or "keto" in text:
+        base = "high protein"
+    elif "vegan" in text:
+        base = "healthy"
+    elif "dinner" in text:
+        base = "dinner"
+    elif "breakfast" in text:
+        base = "breakfast"
+    else:
+        base = "lunch"
+    eta = _eta_minutes(text)
+    if eta:
+        return f"{base} from restaurants under {eta} minutes"
+    return base
+
+
+def _coords_for(location: str) -> Optional[tuple[float, float]]:
+    key = location.strip().lower()
+    if key in CITY_COORDS:
+        return CITY_COORDS[key]
+    for name, coords in CITY_COORDS.items():
+        if name in key:
+            return coords
+    return None
+
+
+def _first_number(value: Any, default: float = 0) -> float:
+    if isinstance(value, bool) or value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        digits = "".join(ch if (ch.isdigit() or ch == ".") else " " for ch in value).split()
+        if digits:
+            try:
+                return float(digits[0])
+            except ValueError:
+                return default
+    if isinstance(value, dict):
+        for key in ("aggregate_rating", "rating", "value", "amount", "price"):
+            if key in value:
+                return _first_number(value[key], default)
+    return default
+
+
+def _as_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return ", ".join(_as_text(item) for item in value if item)
+    if isinstance(value, dict):
+        for key in ("address", "locality", "name", "city", "label"):
+            if value.get(key):
+                return _as_text(value[key])
+        return ""
+    return str(value)
+
+
+def _parse_tool_payload(result: Any) -> Any:
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, dict) and set(structured) == {"result"}:
+        structured = structured["result"]
+    if structured:
+        return structured
+    content = getattr(result, "content", None) or []
+    if not content:
+        return result
+    block = content[0]
+    text = getattr(block, "text", None)
+    if text is None and isinstance(block, dict):
+        text = block.get("text")
+    if not isinstance(text, str):
+        return block
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.strip("`")
+        if stripped.lower().startswith("json"):
+            stripped = stripped[4:]
+        stripped = stripped.strip()
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        return {"text": text}
+
+
+def normalize_restaurants(payload: Any, fallback_location: str = "") -> list[dict[str, Any]]:
+    """Flatten whatever the Zomato search tool returns into FlavorPilot cards."""
+    if isinstance(payload, dict) and "text" in payload and len(payload) == 1:
+        return []
+
+    candidates: list[Any] = []
+    if isinstance(payload, list):
+        candidates = payload
+    elif isinstance(payload, dict):
+        for key in ("results", "restaurants", "data", "items", "outlets"):
+            if isinstance(payload.get(key), list):
+                candidates = payload[key]
+                break
+        else:
+            candidates = [payload]
+
+    restaurants: list[dict[str, Any]] = []
+    for raw in candidates:
+        item = raw.get("restaurant", raw) if isinstance(raw, dict) else None
+        if not isinstance(item, dict):
+            continue
+        name = _as_text(item.get("name") or item.get("restaurant_name") or item.get("res_name"))
+        if not name:
+            continue
+        restaurant_id = _as_text(
+            item.get("res_id") or item.get("restaurant_id") or item.get("id") or item.get("restaurantId")
+        ) or name
+        tags = item.get("tags") or item.get("highlights") or []
+        if isinstance(tags, str):
+            tags = [part.strip() for part in tags.split(",") if part.strip()]
+        elif not isinstance(tags, list):
+            tags = []
+        offer = _as_text(item.get("res_offer") or item.get("offer"))
+        if offer:
+            tags = [offer, *tags]
+        distance = item.get("distance")
+        if distance:
+            tags.append(f"{distance} km")
+        location = _as_text(item.get("location") or item.get("locality") or item.get("address"))
+        if not location and distance:
+            location = f"{distance} km away"
+        restaurants.append({
+            "restaurant_id": restaurant_id,
+            "name": name,
+            "cuisine": _as_text(item.get("cuisine") or item.get("cuisines") or item.get("category")) or "Delivery",
+            "location": location or fallback_location,
+            "rating": _first_number(item.get("rating") or item.get("aggregate_rating") or item.get("user_rating")),
+            "eta_mins": int(_first_number(item.get("eta_mins") or item.get("eta") or item.get("delivery_time") or 30)),
+            "delivery_fee_inr": _first_number(item.get("delivery_fee_inr") or item.get("delivery_fee") or item.get("deliveryFee")),
+            "tags": [str(tag) for tag in tags if tag][:8],
+            "image_url": _as_text(item.get("res_image") or item.get("image_url") or item.get("image")) or None,
+            "offer": offer or None,
+            "menu_items": _dishes_from_search(item.get("items")),
+        })
+    return restaurants
+
+
+def normalize_menu(payload: Any, restaurant_id: str) -> dict[str, Any]:
+    """Flatten a Zomato menu payload into categories of priced items."""
+    raw_items: list[Any] = []
+    categories_in: list[Any] = []
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        data = payload["data"]
+        if isinstance(data.get("partial_menu"), list):
+            raw_items = data["partial_menu"]
+        elif isinstance(data.get("item_mappings"), list):
+            raw_items = data["item_mappings"]
+    elif isinstance(payload, list):
+        raw_items = payload
+    elif isinstance(payload, dict):
+        for key in ("categories", "menu", "menus", "sections"):
+            if isinstance(payload.get(key), list):
+                categories_in = payload[key]
+                break
+        if not categories_in:
+            for key in ("items", "menu_items", "dishes", "data"):
+                if isinstance(payload.get(key), list):
+                    raw_items = payload[key]
+                    break
+
+    categories: list[dict[str, Any]] = []
+    if categories_in:
+        for category in categories_in:
+            if not isinstance(category, dict):
+                continue
+            name = _as_text(category.get("name") or category.get("title") or category.get("category")) or "Menu"
+            source = category.get("items") or category.get("dishes") or category.get("menu_items") or []
+            items = [_menu_item(entry) for entry in source if isinstance(entry, dict)]
+            items = [item for item in items if item]
+            if items:
+                categories.append({"name": name, "items": items})
+    else:
+        items = [_menu_item(entry) for entry in raw_items if isinstance(entry, dict)]
+        items = [item for item in items if item]
+        if items:
+            categories.append({"name": "Menu", "items": items})
+
+    return {"restaurant_id": restaurant_id, "categories": categories}
+
+
+def flatten_menu_items(menu: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for category in menu.get("categories", []):
+        for item in category.get("items", []):
+            items.append({
+                "item_id": str(item.get("item_id", "")),
+                "name": item.get("name", "Item"),
+                "price_inr": float(item.get("price_inr") or 0),
+                "tags": item.get("tags") or [],
+                "detail": item.get("detail") or category.get("name") or "",
+            })
+    return items
+
+
+def _dishes_from_search(raw_items: Any) -> list[dict[str, Any]]:
+    """Dishes embedded in a get_restaurants_for_keyword result."""
+    if not isinstance(raw_items, list):
+        return []
+    dishes: list[dict[str, Any]] = []
+    for entry in raw_items:
+        if not isinstance(entry, dict) or entry.get("name") in (None, "NOT_RETRIEVED"):
+            continue
+        item = _menu_item(entry)
+        if item:
+            dishes.append(item)
+    return dishes
+
+
+def _menu_item(entry: dict[str, Any]) -> Optional[dict[str, Any]]:
+    item = entry.get("item", entry) if isinstance(entry.get("item"), dict) else entry
+    name = _as_text(item.get("name") or item.get("item_name") or item.get("title"))
+    if not name:
+        return None
+    tags = item.get("item_tags") or item.get("tags") or item.get("dietary_tags") or []
+    if isinstance(tags, str):
+        tags = [part.strip() for part in tags.split(",") if part.strip()]
+    elif not isinstance(tags, list):
+        tags = []
+    if item.get("is_veg") is True:
+        tags = ["veg", *tags]
+    elif item.get("is_veg") is False:
+        tags = ["non-veg", *tags]
+    detail = _as_text(item.get("description") or item.get("detail") or item.get("subtitle"))
+    return {
+        "item_id": _as_text(item.get("variant_id") or item.get("item_id") or item.get("catalogue_id") or item.get("id")) or name,
+        "name": name,
+        "price_inr": _first_number(item.get("min_price") or item.get("price_inr") or item.get("discounted_price") or item.get("price") or item.get("cost")),
+        "tags": [str(tag) for tag in tags if tag][:6],
+        "detail": detail,
+        "protein_g": item.get("protein_g"),
+        "carbs_g": item.get("carbs_g"),
+        "fat_g": item.get("fat_g"),
+    }
+
 
 class ZomatoMCPError(Exception):
     """Base exception for Zomato MCP operations."""
@@ -69,6 +375,9 @@ class ZomatoMCPClient:
         self._read_stream: Optional[Any] = None
         self._write_stream: Optional[Any] = None
         self._connected = False
+        self._tools: dict[str, Any] = {}
+        self._address_id: Optional[str] = None
+        self._menus: dict[str, dict[str, Any]] = {}
     
     @asynccontextmanager
     async def _get_transport_context(self) -> AsyncGenerator[tuple[Any, Any], None]:
@@ -121,11 +430,17 @@ class ZomatoMCPClient:
             self._session = ClientSession(self._read_stream, self._write_stream)
             await self._session.__aenter__()
             
-            # Initialize session
+            # Initialize session and cache the live tool list.
             await self._session.initialize()
+            listed = await self._session.list_tools()
+            self._tools = {tool.name: tool for tool in listed.tools}
             
             self._connected = True
-            logger.info("Successfully connected to Zomato MCP server")
+            logger.info(
+                "Connected to Zomato MCP (%s). Tools: %s",
+                self.server_url,
+                ", ".join(self._tools) or "(none)",
+            )
             
         except Exception as e:
             logger.error(f"Failed to connect to Zomato MCP server: {e}")
@@ -156,38 +471,80 @@ class ZomatoMCPClient:
             except Exception as e:
                 logger.error(f"Error closing transport: {e}")
     
-    async def _call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        """
-        Call MCP tool with error handling.
-        
-        Args:
-            tool_name: Name of the MCP tool
-            arguments: Tool arguments
-            
-        Returns:
-            Tool result data
-            
-        Raises:
-            ZomatoMCPToolError: If tool execution fails
-        """
+    def _resolve_tool(self, logical_name: str) -> str:
+        """Pick the live tool name for a FlavorPilot operation."""
+        for candidate in TOOL_ALIASES.get(logical_name, [logical_name]):
+            if candidate in self._tools:
+                return candidate
+        for available in self._tools:
+            if logical_name in available.replace(".", "_"):
+                return available
+        available = ", ".join(sorted(self._tools)) or "none"
+        raise ZomatoMCPToolError(
+            f"Zomato MCP has no '{logical_name}' tool. Available tools: {available}"
+        )
+
+    def _build_arguments(self, tool_name: str, values: dict[str, Any]) -> dict[str, Any]:
+        """Keep only arguments the live tool schema accepts, translating our names."""
+        tool = self._tools.get(tool_name)
+        schema = getattr(tool, "inputSchema", None) or {}
+        properties = schema.get("properties") or {}
+        if not properties:
+            return {key: value for key, value in values.items() if value is not None}
+
+        arguments: dict[str, Any] = {}
+        for key, value in values.items():
+            if value is None:
+                continue
+            for candidate in ARGUMENT_ALIASES.get(key, [key]):
+                if candidate in properties:
+                    prop = properties[candidate] or {}
+                    if prop.get("type") == "integer" and not isinstance(value, bool):
+                        try:
+                            value = int(value)
+                        except (TypeError, ValueError):
+                            pass
+                    arguments[candidate] = value
+                    break
+
+        location = values.get("location")
+        coords = _coords_for(location) if isinstance(location, str) else None
+        if coords:
+            lat, lng = coords
+            for candidate in ARGUMENT_ALIASES["latitude"]:
+                if candidate in properties and candidate not in arguments:
+                    arguments[candidate] = lat
+                    break
+            for candidate in ARGUMENT_ALIASES["longitude"]:
+                if candidate in properties and candidate not in arguments:
+                    arguments[candidate] = lng
+                    break
+
+        # Tools that only accept a free-text query still need the user's words.
+        text_keys = [key for key in ("query", "q", "prompt", "text") if key in properties]
+        if text_keys and text_keys[0] not in arguments and values.get("query"):
+            arguments[text_keys[0]] = values["query"]
+        return arguments
+
+    async def _call_tool(self, logical_name: str, arguments: dict[str, Any]) -> Any:
+        """Call a live Zomato MCP tool."""
         if not self._connected or not self._session:
             raise ZomatoMCPConnectionError("MCP client not connected")
-        
+
+        tool_name = self._resolve_tool(logical_name)
+        payload = self._build_arguments(tool_name, arguments)
+
         try:
-            logger.debug(f"Calling tool '{tool_name}' with args: {arguments}")
-            result = await self._session.call_tool(tool_name, arguments)
-            
-            if hasattr(result, 'content') and result.content:
-                # Extract text content from MCP response
-                content = result.content[0]
-                if hasattr(content, 'text'):
-                    return json.loads(content.text)
-                return content
-            
-            return result
-            
+            logger.info("Calling Zomato tool '%s' with %s", tool_name, payload)
+            result = await self._session.call_tool(tool_name, payload)
+            if getattr(result, "isError", False):
+                message = _parse_tool_payload(result)
+                raise ZomatoMCPToolError(f"{tool_name} failed: {message}")
+            return _parse_tool_payload(result)
+        except ZomatoMCPToolError:
+            raise
         except Exception as e:
-            logger.error(f"Tool '{tool_name}' execution failed: {e}")
+            logger.error("Tool '%s' execution failed: %s", tool_name, e)
             raise ZomatoMCPToolError(f"Tool execution failed: {e}") from e
     
     # ===== Zomato MCP Tool Methods =====
@@ -213,19 +570,39 @@ class ZomatoMCPClient:
         Returns:
             List of restaurant objects with ratings, ETA, fees
         """
+        keyword = zomato_keyword(query)
         arguments = {
-            "query": query,
+            "query": keyword,
             "location": location,
+            "page_size": 8,
         }
         
         if cuisine:
             arguments["cuisine"] = cuisine
         if max_delivery_mins:
             arguments["max_delivery_mins"] = max_delivery_mins
-        if budget_cap_inr:
-            arguments["budget_cap_inr"] = budget_cap_inr
+        if budget_cap_inr and budget_cap_inr <= 800:
+            arguments["filter"] = {"max_price": budget_cap_inr}
+        address = await self._resolve_address(location)
+        arguments["address_id"] = address["address_id"]
         
-        return await self._call_tool("zomato.search_restaurants", arguments)
+        payload = await self._call_tool("search_restaurants", arguments)
+        restaurants = normalize_restaurants(payload, fallback_location=location)
+        if not restaurants and keyword != "lunch":
+            arguments["query"] = "lunch"
+            arguments.pop("filter", None)
+            payload = await self._call_tool("search_restaurants", arguments)
+            restaurants = normalize_restaurants(payload, fallback_location=location)
+        if not restaurants and isinstance(payload, dict) and payload.get("text"):
+            raise ZomatoMCPToolError(str(payload["text"]))
+        for restaurant in restaurants:
+            dishes = restaurant.pop("menu_items", [])
+            if dishes:
+                self._menus[str(restaurant["restaurant_id"])] = {
+                    "restaurant_id": restaurant["restaurant_id"],
+                    "categories": [{"name": "Matching dishes", "items": dishes}],
+                }
+        return restaurants
     
     async def get_menu(
         self,
@@ -246,8 +623,38 @@ class ZomatoMCPClient:
         
         if dietary_filter:
             arguments["dietary_filter"] = dietary_filter
+
+        cached = self._menus.get(str(restaurant_id))
+        if cached:
+            return cached
+
+        if not self._address_id:
+            address = await self._resolve_address(None)
+            arguments["address_id"] = address["address_id"]
+        else:
+            arguments["address_id"] = self._address_id
         
-        return await self._call_tool("zomato.get_menu", arguments)
+        payload = await self._call_tool("get_menu", arguments)
+        menu = normalize_menu(payload, restaurant_id)
+        self._menus[str(restaurant_id)] = menu
+        return menu
+
+    async def _resolve_address(self, location: Optional[str]) -> dict[str, Any]:
+        """Pick a saved Zomato address. Search cannot run without one."""
+        payload = await self._call_tool("get_saved_addresses", {})
+        addresses = payload.get("addresses") if isinstance(payload, dict) else None
+        if not addresses:
+            raise ZomatoMCPToolError(
+                "This Zomato account has no saved delivery address. Add one in the Zomato app, then search again."
+            )
+        wanted = str(settings.zomato_address_id)
+        chosen = next((address for address in addresses if str(address.get("address_id")) == wanted), None)
+        if chosen is None:
+            raise ZomatoMCPToolError(
+                f"Saved Zomato address {wanted} was not on this account."
+            )
+        self._address_id = wanted
+        return chosen
     
     async def get_item_customizations(
         self,
@@ -263,7 +670,7 @@ class ZomatoMCPClient:
             Customization options (portion size, spice level, add-ons)
         """
         arguments = {"item_id": item_id}
-        return await self._call_tool("zomato.get_item_customizations", arguments)
+        return await self._call_tool("get_item_customizations", arguments)
     
     async def apply_promo_code(
         self,
@@ -284,7 +691,7 @@ class ZomatoMCPClient:
             "cart_id": cart_id,
             "promo_code": promo_code,
         }
-        return await self._call_tool("zomato.apply_promo_code", arguments)
+        return await self._call_tool("apply_promo_code", arguments)
     
     async def build_cart(
         self,
@@ -304,8 +711,11 @@ class ZomatoMCPClient:
         arguments = {
             "items": items,
             "delivery_address": delivery_address,
+            "restaurant_id": delivery_address.get("restaurant_id") if isinstance(delivery_address, dict) else None,
+            "address_id": delivery_address.get("address_id") if isinstance(delivery_address, dict) else None,
+            "promo_code": delivery_address.get("promo_code") if isinstance(delivery_address, dict) else None,
         }
-        return await self._call_tool("zomato.build_cart", arguments)
+        return await self._call_tool("create_cart", arguments)
 
 
 # ===== Mock Fallback Client =====

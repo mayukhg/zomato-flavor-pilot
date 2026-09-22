@@ -2,10 +2,10 @@
 import asyncio
 import logging
 import time
-import uuid
 from typing import Any, Optional
 
-from backend.app.mcp import ZomatoMCPClient, MockZomatoMCPClient, ZomatoHTTPMCPClient
+from backend.app.mcp import ZomatoMCPClient
+from backend.app.mcp.zomato_client import flatten_menu_items
 from backend.app.config import settings
 from backend.db import get_session
 from backend.db.models import AgentTrajectory
@@ -74,7 +74,7 @@ class WorkerAgent:
             agent_type="worker",
             worker_id=self.worker_id,
             step_number=len(self.steps) + 1,
-            tool_name="zomato.get_menu",
+            tool_name="get_menu",
             tool_arguments={
                 "restaurant_id": restaurant_id,
                 "dietary_filter": dietary_constraints[0] if dietary_constraints else None,
@@ -82,10 +82,12 @@ class WorkerAgent:
         )
         
         try:
-            menu_data = await self.mcp_client.get_menu(
-                restaurant_id=restaurant_id,
-                dietary_filter=dietary_constraints[0] if dietary_constraints else None,
-            )
+            menu_data = context.get("menu")
+            if not menu_data:
+                menu_data = await self.mcp_client.get_menu(
+                    restaurant_id=restaurant_id,
+                    dietary_filter=dietary_constraints[0] if dietary_constraints else None,
+                )
             
             step.tool_result = menu_data
             step.status = "success"
@@ -122,44 +124,30 @@ class WorkerAgent:
         """Worker 2: Find best promo codes and optimize pricing."""
         start_time = time.time()
         
-        cart_id = context.get("cart_id", f"temp_cart_{uuid.uuid4().hex[:8]}")
-        promo_codes = ["ZOMATO50", "HEALTH20", "CBUSER", "FEAST30"]
-        
-        best_discount = 0.0
-        best_promo = None
-        
         step = AgentStep(
             agent_type="worker",
             worker_id=self.worker_id,
             step_number=len(self.steps) + 1,
-            tool_name="zomato.apply_promo_code",
-            tool_arguments={"cart_id": cart_id, "promo_code": "CBUSER"},
+            tool_name="create_cart",
+            tool_arguments={"promo_code": context.get("promo_code")},
         )
         
         try:
-            # Test each promo code (in parallel for efficiency)
-            promo_results = []
-            for promo in promo_codes:
-                try:
-                    result = await self.mcp_client.apply_promo_code(cart_id, promo)
-                    discount = result.get("discount_inr", 0)
-                    if discount > best_discount:
-                        best_discount = discount
-                        best_promo = promo
-                    promo_results.append({"promo": promo, "discount": discount})
-                except Exception:
-                    continue
-            
-            step.tool_result = {"promos_tested": promo_results, "best_promo": best_promo}
+            # Promo codes belong on Zomato create_cart at checkout. Searching must
+            # not invent cart ids or submit coupons against the live account.
+            step.tool_result = {
+                "status": "deferred",
+                "message": "Promo codes are applied on the Zomato cart at checkout.",
+            }
             step.status = "success"
             step.model_used = settings.smart_intern_model
             step.cost_usd = 0.0001
             
             result = {
                 "status": "success",
-                "best_promo_code": best_promo,
-                "discount_inr": best_discount,
-                "promos_tested": len(promo_results),
+                "best_promo_code": None,
+                "discount_inr": 0,
+                "promos_tested": 0,
             }
             
         except Exception as e:
@@ -183,19 +171,19 @@ class WorkerAgent:
             agent_type="worker",
             worker_id=self.worker_id,
             step_number=len(self.steps) + 1,
-            tool_name="zomato.search_restaurants",
-            tool_arguments={"query": "", "location": context.get("location", ""), "max_delivery_mins": max_eta_mins},
+            tool_name="search_restaurants",
+            tool_arguments={"location": context.get("location", ""), "max_delivery_mins": max_eta_mins},
         )
         
         try:
-            # Mock ETA check (would normally verify with real-time logistics)
-            eta_verified = True
-            estimated_mins = 25
+            estimated_mins = int(context.get("eta_mins") or 0)
+            delivery_fee = float(context.get("delivery_fee_inr") or 0)
             
             step.tool_result = {
                 "restaurant_id": restaurant_id,
                 "eta_mins": estimated_mins,
-                "eta_within_limit": estimated_mins <= max_eta_mins,
+                "eta_within_limit": estimated_mins <= max_eta_mins if estimated_mins else False,
+                "delivery_fee_inr": delivery_fee,
             }
             step.status = "success"
             step.model_used = settings.smart_intern_model
@@ -204,8 +192,8 @@ class WorkerAgent:
             result = {
                 "status": "success",
                 "eta_mins": estimated_mins,
-                "eta_within_limit": eta_verified,
-                "delivery_fee_inr": 29,
+                "eta_within_limit": estimated_mins <= max_eta_mins if estimated_mins else False,
+                "delivery_fee_inr": delivery_fee,
             }
             
         except Exception as e:
@@ -256,7 +244,7 @@ class LeadAgent:
         search_step = AgentStep(
             agent_type="lead",
             step_number=1,
-            tool_name="zomato.search_restaurants",
+            tool_name="search_restaurants",
             tool_arguments={
                 "query": query,
                 "location": location,
@@ -264,23 +252,16 @@ class LeadAgent:
             },
         )
         
-        # Use mock or real MCP client based on configuration
-        if settings.use_mock_mcp:
-            mcp_client = MockZomatoMCPClient()
-        else:
-            # Real MCP client - use HTTP client for official Zomato server
-            if settings.zomato_mcp_transport == "http":
-                mcp_client = ZomatoHTTPMCPClient(
-                    server_url=settings.zomato_mcp_server_url,
-                    api_key=settings.zomato_api_key if settings.zomato_api_key != "not_required_for_public_mcp" else None,
-                )
-            else:
-                # SSE or stdio transport using MCP SDK
-                mcp_client = ZomatoMCPClient(
-                    transport=settings.zomato_mcp_transport,
-                    server_url=settings.zomato_mcp_server_url if settings.zomato_mcp_transport == "sse" else None,
-                    stdio_cmd=settings.zomato_mcp_stdio_cmd if settings.zomato_mcp_transport == "stdio" else None,
-                )
+        # Official Zomato MCP server. "http" in older configs meant the same host;
+        # mcp-remote is the supported way to reach it.
+        transport = settings.zomato_mcp_transport
+        if transport == "http":
+            transport = "stdio"
+        mcp_client = ZomatoMCPClient(
+            transport=transport,
+            server_url=settings.zomato_mcp_server_url,
+            stdio_cmd=settings.zomato_mcp_stdio_cmd,
+        )
         
         try:
             await mcp_client.connect()
@@ -299,18 +280,29 @@ class LeadAgent:
             search_step.cost_usd = 0.0005 if model_used == settings.phd_reasoner_model else 0.0001
             search_step.execution_time_ms = (time.time() - step_start) * 1000
             self.steps.append(search_step)
+
+            menu: dict[str, Any] = {}
+            menu_items: list[dict[str, Any]] = []
+            selected_restaurant = restaurants[0] if restaurants else {}
+            restaurant_id = selected_restaurant.get("restaurant_id")
+            if restaurant_id:
+                try:
+                    menu = await mcp_client.get_menu(restaurant_id=restaurant_id)
+                    menu_items = flatten_menu_items(menu)
+                except Exception as menu_error:
+                    logger.warning("Menu fetch failed for %s: %s", restaurant_id, menu_error)
             
             # If group order with constraints, spawn workers
             if group_size > 1 or dietary_constraints:
-                selected_restaurant = restaurants[0] if restaurants else {}
-                restaurant_id = selected_restaurant.get("restaurant_id")
-                
                 context = {
                     "restaurant_id": restaurant_id,
                     "dietary_constraints": dietary_constraints or [],
                     "budget_cap_inr": budget_cap_inr,
                     "location": location,
                     "max_delivery_mins": 30,
+                    "menu": menu,
+                    "eta_mins": selected_restaurant.get("eta_mins"),
+                    "delivery_fee_inr": selected_restaurant.get("delivery_fee_inr"),
                 }
                 
                 # Spawn worker agents in parallel
@@ -350,6 +342,7 @@ class LeadAgent:
                 "status": "completed",
                 "session_id": self.session_id,
                 "restaurants": restaurants,
+                "menu_items": menu_items,
                 "synthesis": synthesis,
                 "execution_time_ms": total_time,
                 "model_used": model_used,

@@ -3,7 +3,7 @@ import time
 import uuid
 from fastapi import APIRouter, HTTPException
 
-from backend.app.schemas import SearchRequest, SearchResponse, RestaurantResult
+from backend.app.schemas import MenuItemResult, RestaurantResult, SearchRequest, SearchResponse
 from backend.app.agents import LeadAgent
 
 router = APIRouter()
@@ -45,11 +45,16 @@ async def search_restaurants(request: SearchRequest):
         restaurants = [
             RestaurantResult(**r) for r in result.get("restaurants", [])
         ]
+        menu_items = [
+            MenuItemResult(**item) for item in result.get("menu_items", [])
+        ]
         
         execution_time_ms = (time.time() - start_time) * 1000
         
         return SearchResponse(
             restaurants=restaurants,
+            menu_items=menu_items,
+            session_id=session_id,
             execution_time_ms=execution_time_ms,
             model_used=result.get("model_used", "unknown"),
         )

@@ -31,13 +31,8 @@ async def build_cart(request: BuildCartRequest):
     # Calculate totals
     subtotal = sum(item.price_inr * item.quantity for item in request.items)
     
-    # Apply promo discount (mock calculation)
+    # Coupons are applied by Zomato on create_cart, not calculated locally.
     discount = 0.0
-    if request.promo_code:
-        if request.promo_code == "CBUSER":
-            discount = 240.0
-        elif request.promo_code == "HEALTH20":
-            discount = subtotal * 0.2
     
     delivery_fee = 29.0
     platform_fee = 49.0
@@ -49,7 +44,7 @@ async def build_cart(request: BuildCartRequest):
             cart_id=cart_id,
             session_id=request.session_id,
             restaurant_id=request.restaurant_id,
-            restaurant_name="Mock Restaurant",  # Would be fetched from MCP
+            restaurant_name=request.restaurant_id,
             items=[item.model_dump() for item in request.items],
             delivery_address=request.delivery_address.model_dump(),
             subtotal_inr=subtotal,

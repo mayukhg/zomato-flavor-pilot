@@ -27,11 +27,23 @@ class RestaurantResult(BaseModel):
     eta_mins: int
     delivery_fee_inr: float
     tags: list[str]
+    image_url: Optional[str] = None
+
+
+class MenuItemResult(BaseModel):
+    """Menu item returned by the Zomato MCP server."""
+    item_id: str
+    name: str
+    price_inr: float
+    tags: list[str] = []
+    detail: str = ""
 
 
 class SearchResponse(BaseModel):
     """Restaurant search response."""
     restaurants: list[RestaurantResult]
+    menu_items: list[MenuItemResult] = []
+    session_id: Optional[str] = None
     execution_time_ms: float
     model_used: str
 

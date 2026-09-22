@@ -13,12 +13,13 @@ class Settings(BaseSettings):
     
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/flavorpilot"
     
-    # MCP Configuration
-    use_mock_mcp: bool = False  # Set to True for development with mock data
-    zomato_mcp_transport: Literal["http", "sse", "stdio"] = "http"
-    zomato_mcp_server_url: str = "https://mcp-server.zomato.com/mcp"  # Official Zomato MCP server
-    zomato_mcp_stdio_cmd: str = "node /path/to/zomato-mcp-server/dist/index.js"
-    zomato_api_key: str = "zm_live_secret_key"
+    # MCP Configuration — official hosted server via mcp-remote (OAuth in the browser)
+    use_mock_mcp: bool = False
+    zomato_mcp_transport: Literal["http", "sse", "stdio"] = "stdio"
+    zomato_mcp_server_url: str = "https://mcp-server.zomato.com/mcp"
+    zomato_mcp_stdio_cmd: str = "npx -y mcp-remote https://mcp-server.zomato.com/mcp"
+    zomato_address_id: str = "217570301"
+    zomato_api_key: str = ""
     
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000
