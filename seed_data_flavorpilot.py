@@ -108,9 +108,17 @@ def generate_flavorpilot_golden_dataset():
 
 if __name__ == "__main__":
     dataset = generate_flavorpilot_golden_dataset()
+    
+    # Ensure scratch directory exists
+    os.makedirs("/workspace/scratch", exist_ok=True)
     scratch_file = "/workspace/scratch/golden_dataset_flavorpilot.json"
     
     with open(scratch_file, "w") as f:
         json.dump(dataset, f, indent=2)
         
     print(f"Successfully generated {len(dataset)} FlavorPilot test cases at {scratch_file}")
+    print(f"\nBreakdown:")
+    print(f"  - Standard Menu Search: 50 cases")
+    print(f"  - Dietary & Macro Constraints: 25 cases")
+    print(f"  - Multi-User Group Synthesis: 15 cases")
+    print(f"  - Adversarial & Allergen Safety: 10 cases")
